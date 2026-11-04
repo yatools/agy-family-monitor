@@ -13,7 +13,7 @@ Windows 本地采集 · 家庭组共享仪表盘 · 额度校准 · 异常邮件
 [![License: MIT](https://img.shields.io/badge/License-MIT-6e8a60?style=flat-square)](LICENSE)
 [![Windows x64](https://img.shields.io/badge/Windows-x64-52734d?style=flat-square)](docs/INSTALLATION.md)
 [![Version](https://img.shields.io/badge/version-0.2.0-8a9c70?style=flat-square)](CHANGELOG.md)
-[![Checks](https://github.com/yatools/agy-family-monitor/actions/workflows/checks.yml/badge.svg)](https://github.com/yatools/agy-family-monitor/actions/workflows/checks.yml)
+[![Checks](https://github.com/yatools/agy-family-monitor/actions/workflows/checks.yml/badge.svg?branch=main&event=push)](https://github.com/yatools/agy-family-monitor/actions/workflows/checks.yml)
 
 [下载客户端](https://github.com/yatools/agy-family-monitor/releases/latest/download/AgyFamilyMonitor.exe) · [快速开始](#快速开始) · [自行部署](docs/DEPLOYMENT.md) · [监控说明](docs/MONITORING.md) · [参与贡献](CONTRIBUTING.md)
 

@@ -13,7 +13,7 @@ Local Windows collection · Shared dashboard · Quota calibration · Email alert
 [![License: MIT](https://img.shields.io/badge/License-MIT-6e8a60?style=flat-square)](LICENSE)
 [![Windows x64](https://img.shields.io/badge/Windows-x64-52734d?style=flat-square)](docs/INSTALLATION.md)
 [![Version](https://img.shields.io/badge/version-0.2.0-8a9c70?style=flat-square)](CHANGELOG.md)
-[![Checks](https://github.com/yatools/agy-family-monitor/actions/workflows/checks.yml/badge.svg)](https://github.com/yatools/agy-family-monitor/actions/workflows/checks.yml)
+[![Checks](https://github.com/yatools/agy-family-monitor/actions/workflows/checks.yml/badge.svg?branch=main&event=push)](https://github.com/yatools/agy-family-monitor/actions/workflows/checks.yml)
 
 [Download](https://github.com/yatools/agy-family-monitor/releases/latest/download/AgyFamilyMonitor.exe) · [Quick start](#quick-start) · [Self-host](docs/DEPLOYMENT.md) · [Monitoring](docs/MONITORING.md) · [Contribute](CONTRIBUTING.md)
 

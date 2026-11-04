@@ -122,3 +122,14 @@ c1e77e896f474089fe8d3e3c7af6da7da90864a1a945698ddb4850e374cb4b9a。
 未把合成额度测试等同于官方真实采样，也未把在线状态等同于实际使用模型。
 两台独立 Windows、六人权限和六台 72 小时验收仍按上文待办继续，不标记整体验收完成。
 
+## 公开源码发布
+
+2026-11-04 已按用户授权发布至 [yatools/agy-family-monitor](https://github.com/yatools/agy-family-monitor)，MIT 许可。
+中英文 README、原创封面/架构图及合成演示截图、贡献指南、安全说明、部署模板已公开。
+真实 wrangler.jsonc、邮箱配置、凭据、备份及 .local 验证资料均排除；提交作者使用 GitHub noreply 邮箱。
+114 个公开文件与本地提交一致，Release v0.2.0 的四个下载文件与本地 SHA-256 全部一致。
+
+[GitHub Windows 全套检查](https://github.com/yatools/agy-family-monitor/actions/runs/41800767491)通过：
+以公开模板在干净环境安装锁定依赖、Rust 1.98，执行全部格式/测试/Clippy/类型/生产构建检查和 Windows Release 编译。
+后续只修改 README 徽章与静态架构图，已检查链接与 SVG；没有把该运行等同于真实六人 72 小时验收。
+
