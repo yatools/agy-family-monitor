@@ -125,15 +125,7 @@ node scripts/fetch-rust.mjs fetch --locked
 
 ## 它如何工作
 
-```mermaid
-flowchart LR
-  L[六台电脑的本地日志] --> C[Rust 采集与脱敏]
-  C --> Q[DPAPI + SQLite 队列]
-  Q --> W[Workers API + D1]
-  A[官方 CLI 额度读数] --> W
-  W --> D[Access 保护的 Vue 仪表盘]
-  W --> N[邮件与客户端预警]
-```
+![Architecture / 架构](docs/assets/architecture.svg)
 
 | 目录                            | 内容                                                  |
 | ------------------------------- | ----------------------------------------------------- |

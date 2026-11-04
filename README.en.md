@@ -135,15 +135,7 @@ Rust build output uses a temporary directory to avoid GNU linker limitations wit
 
 ## Architecture
 
-```mermaid
-flowchart LR
-  L[Local logs on six PCs] --> C[Rust collection and sanitization]
-  C --> Q[DPAPI + SQLite queue]
-  Q --> W[Workers API + D1]
-  A[Official CLI quota readings] --> W
-  W --> D[Access-protected Vue dashboard]
-  W --> N[Email and client alerts]
-```
+![Architecture / 架构](docs/assets/architecture.svg)
 
 | Directory                       | Responsibility                                                                               |
 | ------------------------------- | -------------------------------------------------------------------------------------------- |

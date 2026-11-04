@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="320" viewBox="0 0 1200 320" role="img" aria-labelledby="title desc">
+  <title id="title">Agy Family Monitor architecture</title>
+  <desc id="desc">Six local log sources feed a Rust collector, a protected local queue and Workers/D1. Official quota readings go to the same backend, which serves the dashboard and alerts.</desc>
+  <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10Z" fill="#8d9f7e"/></marker></defs>
+  <rect width="1200" height="320" rx="20" fill="#f4f6ef"/>
+  <g font-family="Segoe UI,Arial,sans-serif" fill="#52694a">
+    <text x="28" y="35" font-size="12" letter-spacing="2">LOCAL COLLECTION → SANITIZED METADATA → SHARED VISIBILITY</text>
+  </g>
+  <g fill="none" stroke="#8d9f7e" stroke-width="2" marker-end="url(#arrow)">
+    <path d="M203 122H237"/><path d="M428 122H462"/><path d="M653 122H687"/><path d="M878 122H912"/>
+    <path d="M785 226V173"/><path d="M878 134H897V256H912"/>
+  </g>
+  <g fill="#fff" stroke="#dae2d1">
+    <rect x="28" y="76" width="175" height="92" rx="13"/>
+    <rect x="253" y="76" width="175" height="92" rx="13"/>
+    <rect x="478" y="76" width="175" height="92" rx="13"/>
+    <rect x="703" y="76" width="175" height="92" rx="13" fill="#e6eddd"/>
+    <rect x="928" y="76" width="244" height="92" rx="13"/>
+    <rect x="703" y="226" width="175" height="61" rx="13"/>
+    <rect x="928" y="226" width="244" height="61" rx="13"/>
+  </g>
+  <g font-family="Segoe UI,Arial,sans-serif" text-anchor="middle" fill="#304936">
+    <g font-size="19" font-weight="600">
+      <text x="115" y="115">Local logs × 6</text><text x="340" y="115">Rust collector</text>
+      <text x="565" y="115">Local queue</text><text x="790" y="115">Workers + D1</text>
+      <text x="1050" y="115">Vue dashboard</text>
+    </g>
+    <g font-size="12" fill="#78876c">
+      <text x="115" y="143">CLI / IDE metadata</text><text x="340" y="143">Parse · normalize · HMAC</text>
+      <text x="565" y="143">DPAPI + SQLite · retry</text><text x="790" y="143">Price · calibrate · reconcile</text>
+      <text x="1050" y="143">Cloudflare Access</text>
+    </g>
+    <g font-size="16"><text x="790" y="252">Official CLI quota</text><text x="1050" y="252">Email + Windows alerts</text></g>
+    <g font-size="11" fill="#78876c"><text x="790" y="272">Percentages and timestamps only</text><text x="1050" y="272">Sustained conditions · durable delivery</text></g>
+  </g>
+  <text x="30" y="254" font-family="Segoe UI,Arial,sans-serif" font-size="14" fill="#728267">Prompts, conversations and Google credentials stay on the device.</text>
+</svg>
