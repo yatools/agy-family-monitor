@@ -1,0 +1,44 @@
+name: Checks
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    name: Windows / Rust + Web
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install 1.98.0 --profile minimal --component rustfmt --component clippy
+          rustup override set 1.98.0
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Prepare local deployment template
+        run: Copy-Item apps/worker/wrangler.example.jsonc apps/worker/wrangler.jsonc
+      - name: Check public files
+        run: node scripts/check-public.mjs
+      - name: Rust, Worker and web checks
+        run: ./scripts/check.ps1
+      - name: Build Windows release
+        run: ./scripts/build-agent.ps1

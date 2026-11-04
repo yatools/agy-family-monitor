@@ -1,0 +1,88 @@
+# 共享额度监控（0.2.0）
+
+本次需求覆盖原规格人数限制：管理员加五名成员，共六人，共用一套额度。原 SPEC.md 保留初始版本。
+
+## 数据与换算
+
+每台电脑独立读取日志，服务端按时间和模型组将六人的 API 等效费用相加。
+至少一台已登录的官方 Antigravity CLI 执行只读命令 `agy --print /usage --output-format json` 查询额度。
+程序不读取 Google 凭据，只保留四个已知桶的剩余比例、重置时间和观测时间，不上传原始输出。
+
+初始整池估值：Gemini 5H $200、每周 $800；Claude/第三方 5H $50、每周 $100。
+这些不是每人额度，也不能相加；Claude 与其他第三方模型属于官方 3p 桶。
+
+校准公式：全组该模型组的同期记录费用 / 官方剩余比例下降值 = 整档金额估值。
+例如六人 Gemini 合计 $20，5H 余额下降 10%，得到 $200。5H 和周限分别校准。
+同档只选择一个持续可用的主读数，其他客户端交叉校验，不把六个相同读数计成六倍。
+
+## 规则
+
+- 默认六名活动成员都至少绑定一台未撤销设备后，启用自动预警。
+- 0.2.0 每分钟心跳，三分钟失联即离线；兼容旧版十分钟窗口。
+- 客户端每五分钟查询官方额度；服务器分时检查阈值预警和额度对账，各自五分钟一次。
+- 在线且全组 30 分钟无事件，持续两次检查后提醒；电脑闲置也可能没有事件，不能据此认定违规。
+- 等候 10 分钟补传后对账，缺口至少 $5 且超过 30%，连续两个有效窗口才提醒。
+- 最少六个有效校准样本，用最近最多 30 个样本中位数；读取异常、积压、未知模型或缺价格不参加校准。
+- 重置、额度回升、主读数设备切换、超过一小时的采样间隔均重建基线。
+- 同时读数差异超过十个百分点，暂停该桶对账和校准，提示共享读数冲突。
+- 校准完成后的大缺口以及偏离既有估值 20% 以上的样本不会被学习，防止把漏采集吸收为新额度。
+- 未完成校准时，仅对明显“官方下降但零 Token”的情况发金额异常提醒。
+- 价格生效变化或管理员重新校准会建立新基线，旧样本保留。
+- 后续补传或修正补齐被告警窗口时，检查可解除缺口提醒。
+
+这是经验性对账，官方扣费权重可能变化，不能当作精确账单或违规证据。演示模式只展示标注的合成数据。
+
+## 邮件
+
+使用 Cloudflare send_email，限制固定发件人和目的地；真实邮箱仅存 D1 和忽略目录，不提交 Git。
+发件域名启用 Email Routing、目的邮箱已验证后可用免费通道，无需购买任意收件人发信套餐。
+
+```powershell
+./scripts/configure-email.ps1 -From 你的发件邮箱 -To 你的收件邮箱 -Remote
+./scripts/deploy.ps1
+```
+
+设置页可测试、查看状态和重试失败邮件。测试注明不代表异常，五分钟内去重。
+同类持续异常六小时内发一次，同轮多项合并一封；失败保留队列并指数重试，八次失败后可手动重试。
+租约避免并发重复，固定 X-Agy-Message-Key 用于追踪；Message-ID 交由 Cloudflare 生成。
+发送与数据库之间没有分布式原子提交，
+进程恰在服务接收邮件后崩溃仍可能重复一次。“已提交发送”只代表 Cloudflare 接收，不代表确认收件箱。
+自动告警受全员绑定门槛限制，手动测试不受此门槛限制。
+
+## 当前价格
+
+2026-11-04 核验，美元/百万 Token，标准文本推理：
+
+| 模型 | Input | Output | Cache Read | Cache Write |
+| --- | --- | --- | --- | --- |
+| Gemini 4 Argon | 2 | 10 | 0.10 | 2 |
+| Claude Opus 5.5 | 4 | 20 | 0.20 | 5 |
+| Claude Sonnet 5.5 | 2 | 10 | 0.10 | 2.50 |
+| Gemini 3.8 Flash | 0.75 | 3.75 | 0.075 | 0.75 |
+
+还包含已核验 Opus 4.6、Sonnet 4.6/4.5、Fable 5.1，保留原有来源版本。
+Claude 缓存写入按五分钟档，日志不提供一小时 TTL；Google 缓存创建按标准输入价估算，不含存储费用。
+2026-12-01 起 Argon 为 4/20/0.20/4；2027-01-01 起 Flash 为 1.50/7.50/0.15/1.50，已预置生效日期。
+不将未来价格提前用于今天；已计价历史保留 price_id，未知价格历史可管理员补算。
+这是本次核验快照，不推测厂商未来未公布的调整。
+
+来源：[Google 定价](https://aistudio.google.com/docs/pricing)、[缓存计费](https://firebase.google.com/docs/ai-logic/context-caching)、
+[Anthropic 定价](https://platform.claude.com/docs/en/about-claude/pricing)、[Cloudflare 免费通道](https://developers.cloudflare.com/email-service/platform/pricing/)、
+[CLI 命令](https://antigravity.google/docs/cli/reference/)。
+
+## 升级客户端
+
+全员更新到 0.2.0，在至少一台电脑安装并登录官方 Antigravity CLI。
+找不到 CLI 时，可在客户端 config.json 设置 quota_cli_path 为实际 CLI 绝对路径。
+其他电脑可设 quota_enabled=false，独立 Token 采集不受影响。
+
+```powershell
+schtasks.exe /End /TN AgyFamilyMonitor
+.\AgyFamilyMonitor.exe --install
+.\AgyFamilyMonitor.exe --check-quota
+.\AgyFamilyMonitor.exe --background
+```
+
+先停止旧登录任务；不要使用 --uninstall，以免移除队列和凭据。没有任务时第一条可报告不存在。
+--check-quota 只输出查询状态和识别桶数，不输出凭据或原始结果。
+

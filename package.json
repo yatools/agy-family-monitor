@@ -1,0 +1,25 @@
+{
+  "name": "agy-family-monitor",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/worker",
+    "apps/web"
+  ],
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "dev": "npm run dev -w @agy/worker",
+    "dev:web": "npm run dev -w @agy/web",
+    "build": "npm run build -w @agy/web && npm run build -w @agy/worker",
+    "test": "npm run test --workspaces",
+    "typecheck": "npm run typecheck --workspaces",
+    "check": "npm run test && npm run typecheck && npm run build"
+  },
+  "devDependencies": {
+    "prettier": "3.9.10"
+  }
+}
+

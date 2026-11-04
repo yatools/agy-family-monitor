@@ -1,0 +1,47 @@
+{
+  "repository": "https://github.com/farion1231/cc-switch",
+  "commit": "51fce968bca807aeee93be9420c651afb582c2c8",
+  "license": "MIT",
+  "files": [
+    {
+      "path": "src-tauri/src/database/schema.rs",
+      "sha256": "c0f714d3a022e3e941bdcfdb718ba29c96b1e2b40a4e8c866b45c794f668c3cd"
+    },
+    {
+      "path": "LICENSE",
+      "sha256": "d7205ca3df388956995a2f1bb31c03c10a408e619e4f9588bdbd6b243bec3b1f"
+    },
+    {
+      "path": "src-tauri/src/services/session_usage_agy.rs",
+      "sha256": "67ad4801fac54538eb68591617da8133da117d71f7a9641c516d18e19ef08c1d"
+    },
+    {
+      "path": "src-tauri/src/session_manager/providers/agy.rs",
+      "sha256": "3df7f1aff67a08c4b7688f3ce64dda50c83be21368bb6f3ce75cceb15c157d54"
+    },
+    {
+      "path": "src-tauri/src/services/session_usage_agy/native_models.rs",
+      "sha256": "95ea4eaf81fe07df63706b37d0b3dbd50a05f5e85b41928e3ec429e3fae47290"
+    },
+    {
+      "path": "src-tauri/src/agy_config.rs",
+      "sha256": "9e76523960ff0d7f25cbfd44d3510be20bc731da2c6b4c114d669e00ff0ba368"
+    },
+    {
+      "path": "src-tauri/src/services/subscription_agy.rs",
+      "sha256": "3d463bf690d1ff710a5c57703951947e0f4863d502aa827e4d894218fc9799d3"
+    },
+    {
+      "path": "src-tauri/src/services/usage_stats.rs",
+      "sha256": "5a093061df316f9438f7ab7ab0449c1a438b1315b5978ee48e171293be1eec2c"
+    },
+    {
+      "path": "src-tauri/src/proxy/usage/calculator.rs",
+      "sha256": "4828753d4438b686cece2056b0855801128892f388b909aeb446cd24d0e67fde"
+    },
+    {
+      "path": "src-tauri/src/session_manager/providers/utils.rs",
+      "sha256": "66c0500f664afaec978a6c30278a4f439b4bce901971e117c9d2909716fcb8bc"
+    }
+  ]
+}

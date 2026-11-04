@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="360" viewBox="0 0 1200 360" role="img" aria-labelledby="title desc">
+  <title id="title">Agy Family Monitor</title>
+  <desc id="desc">Six independent collectors. One shared picture. Private conversations stay on your device.</desc>
+  <defs>
+    <linearGradient id="bg" x2="1" y2="1"><stop stop-color="#f4f6ed"/><stop offset="1" stop-color="#e5eddd"/></linearGradient>
+    <linearGradient id="chart" x2="0" y2="1"><stop stop-color="#93ad78" stop-opacity=".32"/><stop offset="1" stop-color="#93ad78" stop-opacity="0"/></linearGradient>
+  </defs>
+  <rect width="1200" height="360" rx="24" fill="url(#bg)"/>
+  <circle cx="1090" cy="48" r="156" fill="#d6e2ca" opacity=".5"/>
+  <g transform="translate(54 51)" fill="#53744b">
+    <rect x="0" y="19" width="13" height="32" rx="5" transform="rotate(-9 6 35)"/>
+    <rect x="22" y="5" width="13" height="46" rx="5" transform="rotate(-9 28 28)"/>
+    <rect x="44" y="14" width="13" height="37" rx="5" transform="rotate(-9 50 32)"/>
+  </g>
+  <g font-family="Segoe UI,Arial,sans-serif" fill="#263e30">
+    <text x="132" y="80" font-size="15" font-weight="600" letter-spacing="3">LOCAL LOGS. SHARED CLARITY.</text>
+    <text x="54" y="158" font-size="57" font-weight="700" letter-spacing="-2">Agy Family Monitor</text>
+    <text x="57" y="205" font-size="22" fill="#64755b">Six independent collectors. One shared picture.</text>
+    <text x="57" y="237" font-size="17" fill="#718067">Token usage, quota calibration and thoughtful alerts.</text>
+  </g>
+  <g font-family="Segoe UI,Arial,sans-serif" font-size="13" fill="#52664b">
+    <rect x="56" y="277" width="156" height="33" rx="16" fill="#fff" opacity=".8"/>
+    <text x="76" y="299">WINDOWS + RUST</text>
+    <rect x="224" y="277" width="175" height="33" rx="16" fill="#fff" opacity=".8"/>
+    <text x="244" y="299">CLOUDFLARE + VUE</text>
+    <rect x="411" y="277" width="130" height="33" rx="16" fill="#fff" opacity=".8"/>
+    <text x="432" y="299">MIT LICENSE</text>
+  </g>
+  <g transform="translate(777 69)">
+    <rect width="366" height="238" rx="18" fill="#fff" opacity=".9"/>
+    <g font-family="Segoe UI,Arial,sans-serif" fill="#526d49">
+      <text x="26" y="36" font-size="12" letter-spacing="1.8">ONE FAMILY / ONE POOL</text>
+      <text x="26" y="83" font-size="38" font-weight="700">6</text>
+      <text x="62" y="79" font-size="14" fill="#7b8872">members</text>
+      <text x="189" y="83" font-size="38" font-weight="700">4</text>
+      <text x="227" y="79" font-size="14" fill="#7b8872">token counters</text>
+    </g>
+    <path d="M26 177 L64 162 L102 170 L140 130 L178 144 L216 114 L254 130 L294 99 L339 107 L339 202 L26 202Z" fill="url(#chart)"/>
+    <path d="M26 177 L64 162 L102 170 L140 130 L178 144 L216 114 L254 130 L294 99 L339 107" fill="none" stroke="#799665" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="26" y="222" font-family="Segoe UI,Arial,sans-serif" font-size="12" fill="#7b8872">Conversations stay on your device.</text>
+  </g>
+</svg>

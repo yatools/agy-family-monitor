@@ -1,0 +1,31 @@
+[workspace]
+members = ["crates/agy-usage-core", "agent"]
+resolver = "2"
+
+[workspace.package]
+version = "0.2.0"
+edition = "2021"
+license = "MIT"
+rust-version = "1.98"
+
+[workspace.dependencies]
+agy-usage-core = { path = "crates/agy-usage-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+rusqlite = { version = "0.38", features = ["bundled"] }
+prost = "0.14"
+hmac = "0.12"
+sha2 = "0.10"
+hex = "0.4"
+tempfile = "3"
+tokio = { version = "1", features = ["rt", "macros", "time", "sync", "signal", "net", "io-util", "process"] }
+notify = "8"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+base64 = "0.22"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+

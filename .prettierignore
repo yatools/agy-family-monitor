@@ -1,0 +1,8 @@
+node_modules
+dist
+.upstream
+.local
+artifacts
+target
+package-lock.json
+SPEC.md
