@@ -15,7 +15,7 @@ Windows 本地采集 · 家庭组共享仪表盘 · 额度校准 · 异常邮件
 [![Version](https://img.shields.io/badge/version-0.2.0-8a9c70?style=flat-square)](CHANGELOG.md)
 [![Checks](https://github.com/yatools/agy-family-monitor/actions/workflows/checks.yml/badge.svg)](https://github.com/yatools/agy-family-monitor/actions/workflows/checks.yml)
 
-[下载客户端](https://agent-token.lupages.com/downloads/AgyFamilyMonitor.exe) · [快速开始](#快速开始) · [自行部署](docs/DEPLOYMENT.md) · [监控说明](docs/MONITORING.md) · [参与贡献](CONTRIBUTING.md)
+[下载客户端](https://github.com/yatools/agy-family-monitor/releases/latest/download/AgyFamilyMonitor.exe) · [快速开始](#快速开始) · [自行部署](docs/DEPLOYMENT.md) · [监控说明](docs/MONITORING.md) · [参与贡献](CONTRIBUTING.md)
 
 </div>
 
@@ -58,7 +58,7 @@ Step 修正和备份恢复。未知价格保留为“待计价”，不会当成
 ### 加入已有家庭组
 
 需要 Windows 10/11 x64，以及管理员在网站生成的一次性绑定码。
-下载 [Windows 客户端](https://agent-token.lupages.com/downloads/AgyFamilyMonitor.exe)，在所在目录运行：
+下载 [Windows 客户端](https://github.com/yatools/agy-family-monitor/releases/latest/download/AgyFamilyMonitor.exe)，在所在目录运行：
 
 ```powershell
 .\AgyFamilyMonitor.exe --enroll

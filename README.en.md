@@ -15,7 +15,7 @@ Local Windows collection · Shared dashboard · Quota calibration · Email alert
 [![Version](https://img.shields.io/badge/version-0.2.0-8a9c70?style=flat-square)](CHANGELOG.md)
 [![Checks](https://github.com/yatools/agy-family-monitor/actions/workflows/checks.yml/badge.svg)](https://github.com/yatools/agy-family-monitor/actions/workflows/checks.yml)
 
-[Download](https://agent-token.lupages.com/downloads/AgyFamilyMonitor.exe) · [Quick start](#quick-start) · [Self-host](docs/DEPLOYMENT.md) · [Monitoring](docs/MONITORING.md) · [Contribute](CONTRIBUTING.md)
+[Download](https://github.com/yatools/agy-family-monitor/releases/latest/download/AgyFamilyMonitor.exe) · [Quick start](#quick-start) · [Self-host](docs/DEPLOYMENT.md) · [Monitoring](docs/MONITORING.md) · [Contribute](CONTRIBUTING.md)
 
 </div>
 
@@ -60,7 +60,7 @@ valid calibration samples before they can trigger a discrepancy alert.
 ### Join an existing family
 
 You need Windows 10/11 x64 and a one-time enrollment code from your administrator.
-Download the [Windows client](https://agent-token.lupages.com/downloads/AgyFamilyMonitor.exe), then run:
+Download the [Windows client](https://github.com/yatools/agy-family-monitor/releases/latest/download/AgyFamilyMonitor.exe), then run:
 
 ```powershell
 .\AgyFamilyMonitor.exe --enroll
