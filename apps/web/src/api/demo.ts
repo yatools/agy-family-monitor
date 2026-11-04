@@ -1,4 +1,5 @@
-import type { Totals, Member, Usage, Filters, Snapshot, Rule } from './types';
+import type { Totals, Member, Usage, Filters, Snapshot, Rule, AdminSnapshot } from './types';
+import { overview } from './client';
 export const empty = (): Totals => ({
   total_tokens: 0,
   input_tokens: 0,
@@ -114,7 +115,11 @@ export function matches(row: Usage, filter: Filters): boolean {
     (!filter.source || row.source === filter.source)
   );
 }
-export function snapshot(filters: Filters, page = 1): Snapshot {
+export function snapshot(
+  filters: Filters,
+  page = 1,
+  options: { role?: 'admin' | 'member'; setup?: boolean } = {},
+): Snapshot {
   const rows = demoRows.filter((r) => matches(r, filters));
   const todayRows = demoRows.filter(
     (r) => new Date(r.occurred_at_ms).toISOString().slice(0, 10) === today,
@@ -159,8 +164,17 @@ export function snapshot(filters: Filters, page = 1): Snapshot {
         ),
       ),
     }));
-  return {
-    me: members[0],
+  const result: AdminSnapshot = {
+    me: { ...members[0], email: members[0].email!, notifications_enabled: 1 },
+    monitor: {
+      collection_active: true,
+      ready: true,
+      expected_members: 6,
+      bound_members: 6,
+      total_members: 6,
+      online_members: 4,
+      alerts: [],
+    },
     summary: {
       today: total(todayRows),
       week: total(demoRows.filter((r) => r.occurred_at_ms >= weekStart)),
@@ -206,6 +220,21 @@ export function snapshot(filters: Filters, page = 1): Snapshot {
     ],
     rules: demoRules.map((r) => ({ ...r })),
     settings: {
+      collection: {
+        config: { enabled: true, interval_seconds: 300 },
+        devices: members.map((m) => ({
+          id: `device-${m.id}`,
+          device_label: `${m.display_name}的 Windows PC`,
+          display_name: m.display_name,
+          supported: true,
+          online: m.online,
+          last_scan_at_ms: m.last_report_ms,
+          effective_enabled: true,
+          effective_interval_seconds: 300,
+          pending_events: 0,
+          last_request: null,
+        })),
+      },
       timezone: 'Asia/Shanghai',
       notifications_enabled: true,
       prices: [],
@@ -218,6 +247,7 @@ export function snapshot(filters: Filters, page = 1): Snapshot {
         revoked_at_ms: null,
       })),
       monitor: {
+        collection_active: true,
         config: {
           enabled: true,
           expected_members: 6,
@@ -264,4 +294,33 @@ export function snapshot(filters: Filters, page = 1): Snapshot {
       },
     },
   };
+  if (options.setup) {
+    result.members = result.members.slice(0, 1);
+    result.settings.devices = [];
+    result.settings.collection.devices = [];
+    Object.assign(result.settings.monitor, {
+      ready: false,
+      bound_members: 0,
+      total_members: 1,
+      online_members: 0,
+    });
+    for (const bucket of result.settings.monitor.buckets) {
+      bucket.samples = 0;
+      bucket.calibrated = false;
+      bucket.capacity_micro_usd = bucket.initial_capacity_micro_usd;
+      bucket.latest = null;
+    }
+  }
+  result.monitor = overview(result.settings.monitor);
+  if (options.role === 'member') {
+    const member = members[1];
+    return {
+      ...result,
+      me: { ...member, email: member.email!, notifications_enabled: 1 },
+      settings: null,
+      rules: [],
+      members: members.map((m) => ({ ...m, email: null, notifications_enabled: undefined })),
+    };
+  }
+  return result;
 }

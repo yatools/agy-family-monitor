@@ -42,6 +42,7 @@ pub struct Config {
     pub protected_credentials: Option<String>,
     pub extra_roots: Vec<ExtraRoot>,
     pub cc_switch_dir: Option<PathBuf>,
+    pub discovery_home: Option<PathBuf>,
     pub notifications_enabled: bool,
     pub quota_enabled: bool,
     pub quota_cli_path: Option<PathBuf>,
@@ -54,6 +55,7 @@ impl Default for Config {
             protected_credentials: None,
             extra_roots: vec![],
             cc_switch_dir: None,
+            discovery_home: None,
             notifications_enabled: true,
             quota_enabled: true,
             quota_cli_path: None,
@@ -101,7 +103,12 @@ impl Config {
         self.protected_credentials = Some(STANDARD.encode(crate::windows::dpapi::protect(&bytes)?));
         Ok(())
     }
-    pub fn apply(&self, discovery: &mut DiscoveryConfig) {
+    pub fn apply(&self, discovery: &mut DiscoveryConfig, explicit_home: bool) {
+        if !explicit_home {
+            if let Some(home) = &self.discovery_home {
+                discovery.home = home.clone();
+            }
+        }
         if discovery.cc_switch_dir.is_none() {
             discovery.cc_switch_dir = self.cc_switch_dir.clone();
         }
@@ -118,4 +125,25 @@ pub fn default_data_dir() -> Result<PathBuf, &'static str> {
     std::env::var_os("LOCALAPPDATA")
         .map(|p| PathBuf::from(p).join("AgyFamilyMonitor"))
         .ok_or("无法定位 LocalAppData，请指定 --data-dir")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn background_retains_enrollment_scope_and_explicit_home_still_wins() {
+        let mut config: Config = serde_json::from_str("{}").unwrap();
+        assert!(config.discovery_home.is_none());
+        config.discovery_home = Some(PathBuf::from("isolated-fixture-home"));
+        let mut discovery = DiscoveryConfig {
+            home: PathBuf::from("current-user-home"),
+            cc_switch_dir: None,
+            extra_roots: vec![],
+        };
+        config.apply(&mut discovery, false);
+        assert_eq!(discovery.home, PathBuf::from("isolated-fixture-home"));
+        discovery.home = PathBuf::from("explicit-home");
+        config.apply(&mut discovery, true);
+        assert_eq!(discovery.home, PathBuf::from("explicit-home"));
+    }
 }

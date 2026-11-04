@@ -9,6 +9,7 @@ import type { AppEnv, Price } from './types';
 import { monitorConfigSchema, isOnline } from './monitor-config';
 import { monitorStatus } from './monitor';
 import { emailConfig, enqueueEmail, flushEmails } from './email';
+import { collectionSchema, collectionStatus, supportsControl } from './collection';
 
 const admin = (c: Context<AppEnv>) => {
   if (c.get('member').role !== 'admin') throw new HTTPException(403, { message: 'admin_required' });
@@ -132,6 +133,8 @@ dashboard.get('/members', async (c) => {
   return c.json({
     items: members.map((m) => ({
       ...m,
+      email: c.get('member').role === 'admin' ? m.email : null,
+      notifications_enabled: c.get('member').role === 'admin' ? m.notifications_enabled : undefined,
       online: presence.some((d) => d.member_id === m.id && isOnline(d, now)),
       device_count: presence.filter((d) => d.member_id === m.id).length,
       today: rows[0].results.find((r) => r.member_id === m.id) ?? emptyTotals,
@@ -212,7 +215,7 @@ dashboard.get('/trends', async (c) => {
 dashboard.get('/alerts', async (c) => {
   const member = c.get('member');
   const rows = await c.env.DB.prepare(
-    'SELECT n.*,m.display_name,EXISTS(SELECT 1 FROM dashboard_alert_acks a WHERE a.notification_id=n.id AND a.member_id=?) AS acknowledged FROM alert_notifications n LEFT JOIN members m ON m.id=n.member_id ORDER BY created_at_ms DESC LIMIT 200',
+    'SELECT n.*,r.metric,m.display_name,EXISTS(SELECT 1 FROM dashboard_alert_acks a WHERE a.notification_id=n.id AND a.member_id=?) AS acknowledged FROM alert_notifications n JOIN alert_rules r ON r.id=n.rule_id LEFT JOIN members m ON m.id=n.member_id ORDER BY created_at_ms DESC LIMIT 200',
   )
     .bind(member.id)
     .all();
@@ -314,6 +317,7 @@ dashboard.get('/settings', async (c) => {
   return c.json({
     timezone: await timezone(c.env.DB),
     notifications_enabled: !!member.notifications_enabled,
+    collection: await collectionStatus(c.env.DB),
     monitor: await monitorStatus(c.env, Date.now(), member.role === 'admin'),
     prices: (
       await c.env.DB.prepare(
@@ -360,6 +364,76 @@ dashboard.post('/prices', async (c) => {
     )
     .run();
   return c.json({ id }, 201);
+});
+dashboard.get('/collection', async (c) => {
+  admin(c);
+  return c.json(await collectionStatus(c.env.DB));
+});
+dashboard.put('/collection/settings', async (c) => {
+  admin(c);
+  const body = collectionSchema.parse(await c.req.json());
+  const now = Date.now();
+  await c.env.DB.batch([
+    c.env.DB.prepare(
+      "INSERT INTO settings VALUES('collection_config',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+    ).bind(JSON.stringify(body)),
+    c.env.DB.prepare("DELETE FROM monitor_runtime WHERE key='armed_at' OR key LIKE 'baseline:%'"),
+    c.env.DB.prepare(
+      "INSERT INTO monitor_runtime VALUES('calibration_cutoff',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+    ).bind(String(now)),
+    c.env.DB.prepare(
+      "UPDATE quota_intervals SET status='skipped',reason='collection_configuration_changed' WHERE status='pending'",
+    ),
+    c.env.DB.prepare('DELETE FROM monitor_conditions'),
+    c.env.DB.prepare(
+      'UPDATE monitor_alerts SET resolved_at_ms=? WHERE resolved_at_ms IS NULL',
+    ).bind(now),
+    c.env.DB.prepare(
+      "UPDATE email_outbox SET status='cancelled' WHERE alert_id IS NOT NULL AND status='pending'",
+    ),
+  ]);
+  return c.json({ success: true });
+});
+dashboard.post('/collection/run', async (c) => {
+  admin(c);
+  const body = z
+    .strictObject({ device_id: z.string().min(1).max(80).optional() })
+    .parse(await c.req.json());
+  const now = Date.now();
+  const devices = (
+    await c.env.DB.prepare(
+      "SELECT d.id,d.agent_version FROM devices d JOIN members m ON m.id=d.member_id WHERE d.revoked_at_ms IS NULL AND m.status='active'" +
+        (body.device_id ? ' AND d.id=?' : ''),
+    )
+      .bind(...(body.device_id ? [body.device_id] : []))
+      .all<{ id: string; agent_version: string | null }>()
+  ).results.filter((d) => supportsControl(d.agent_version));
+  if (!devices.length) return c.json({ error: 'no_supported_devices' }, 409);
+  await c.env.DB.prepare(
+    "UPDATE collection_requests SET status='expired' WHERE status='pending' AND expires_at_ms<=?",
+  )
+    .bind(now)
+    .run();
+  await c.env.DB.batch(
+    devices.map((d) =>
+      c.env.DB.prepare(
+        'INSERT OR IGNORE INTO collection_requests(id,device_id,requested_at_ms,expires_at_ms) VALUES(?,?,?,?)',
+      ).bind(crypto.randomUUID(), d.id, now, now + 900000),
+    ),
+  );
+  return c.json({ success: true, devices: devices.length, expires_at_ms: now + 900000 }, 202);
+});
+dashboard.get('/monitor/overview', async (c) => {
+  const status = await monitorStatus(c.env);
+  return c.json({
+    ready: status.ready,
+    collection_active: status.collection_active,
+    expected_members: status.config.expected_members,
+    bound_members: status.bound_members,
+    total_members: status.total_members,
+    online_members: status.online_members,
+    alerts: status.alerts,
+  });
 });
 dashboard.get('/monitor', (c) =>
   monitorStatus(c.env, Date.now(), c.get('member').role === 'admin').then((result) =>

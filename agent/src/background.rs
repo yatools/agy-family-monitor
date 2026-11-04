@@ -3,7 +3,6 @@ use crate::{
     queue::Queue,
     tracker::Tracker,
     uploader::{Api, ApiError},
-    watcher::WatcherState,
 };
 use agy_usage_core::{discovery::DiscoveryConfig, normalizer::Pseudonymizer};
 use std::{
@@ -144,49 +143,39 @@ pub async fn run(
     let mut queue = queue(data_dir, credentials)?;
     let pseudonyms = Pseudonymizer::new(&credentials.key()?)?;
     let mut tracker = Tracker::default();
-    let (tx, mut rx) = tokio::sync::mpsc::channel(1);
-    let mut watcher = WatcherState::new(tx).ok();
-    if watcher.is_none() {
-        log(data_dir, "文件监听不可用，已启用定时扫描");
-    }
-    let mut scans = tokio::time::interval(Duration::from_secs(60));
-    let mut uploads = tokio::time::interval(Duration::from_secs(15));
+    let mut control = crate::collection::Controller::load(&queue)?;
+    // File changes do not bypass the administrator's interval. Polling reparses changed snapshots.
+    let mut work = tokio::time::interval(Duration::from_secs(15));
     let mut heartbeats = tokio::time::interval(Duration::from_secs(60));
-    let mut quota_timer = tokio::time::interval(Duration::from_secs(300));
-    quota_timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut alerts = tokio::time::interval(Duration::from_secs(60));
+    for timer in [&mut work, &mut heartbeats, &mut alerts] {
+        timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    }
     let (quota_tx, mut quota_rx) = tokio::sync::mpsc::channel(1);
     let mut quota_task: Option<tokio::task::JoinHandle<()>> = None;
     let mut quota_reading = crate::quota::Poll::default();
-    let mut alerts = tokio::time::interval(Duration::from_secs(60));
-    let mut debounce = tokio::time::interval(Duration::from_secs(1));
-    for timer in [
-        &mut scans,
-        &mut uploads,
-        &mut heartbeats,
-        &mut alerts,
-        &mut debounce,
-    ] {
-        timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-    }
-    let mut dirty = false;
+    let mut last_quota_at = 0;
     let mut auth_blocked = false;
     let shutdown = tokio::signal::ctrl_c();
     tokio::pin!(shutdown);
-    log(data_dir, "客户端已启动");
+    log(data_dir, "客户端已启动，按管理员设置的频率采集");
     loop {
         tokio::select! {
             _=&mut shutdown=>break,
-            _=scans.tick()=>{
-                if let Some(watcher)=&mut watcher{watcher.refresh(discovery);}
-                match tracker.collect(discovery,&mut queue,&pseudonyms,now_ms()){Ok(_)=>{},Err(message)=>log(data_dir,message)}
-                dirty=false;
-            }
-            Some(())=rx.recv(), if watcher.is_some()=>{dirty=true;}
-            _=debounce.tick(), if dirty=>{
-                if let Err(message)=tracker.collect(discovery,&mut queue,&pseudonyms,now_ms()){log(data_dir,message);}
-                dirty=false;
-            }
-            _=uploads.tick()=>{
+            _=work.tick()=>{
+                let now=now_ms();
+                if !auth_blocked && control.due(now) {
+                    let manual=control.request.is_some();
+                    let success=match tracker.collect(discovery,&mut queue,&pseudonyms,now){Ok(_)=>tracker.health.read_errors==0&&tracker.health.native_errors==0&&tracker.health.malformed_lines==0,Err(message)=>{log(data_dir,message);false}};
+                    control.finish(&queue,now,success)?;
+                    if (now-last_quota_at>=300000 || manual)
+                        && quota_task.as_ref().is_none_or(|task|task.is_finished()) {
+                            last_quota_at=now;
+                            let tx=quota_tx.clone();let enabled=config.quota_enabled;let path=config.quota_cli_path.clone();
+                            quota_task=Some(tokio::spawn(async move{let reading=crate::quota::poll(enabled,path.as_deref()).await;let _=tx.send(reading).await;}));
+                    }
+                    if manual { heartbeats.reset_immediately(); }
+                }
                 if !auth_blocked {
                     match upload(&api,credentials,&mut queue).await {
                         Ok(n)=>{if n>0{let _=queue.set_state("last_upload_ms",&now_ms().to_string());let _=queue.set_state("last_error","");}}
@@ -195,12 +184,18 @@ pub async fn run(
                 }
             }
             _=heartbeats.tick()=>{
-                if !auth_blocked {if let Err(error)=api.heartbeat(credentials,queue.pending_count()?,config.notifications_enabled,&tracker.health,&quota_reading).await{auth_blocked=error==ApiError::AuthRejected;log(data_dir,&error.to_string());}}
-            }
-            _=quota_timer.tick()=>{
-                if !auth_blocked&&quota_task.as_ref().is_none_or(|task|task.is_finished()){
-                    let tx=quota_tx.clone();let enabled=config.quota_enabled;let path=config.quota_cli_path.clone();
-                    quota_task=Some(tokio::spawn(async move{let reading=crate::quota::poll(enabled,path.as_deref()).await;let _=tx.send(reading).await;}));
+                if !auth_blocked {
+                    let now=now_ms();
+                    tracker.health.collection_enabled=Some(control.policy.enabled);
+                    tracker.health.collection_interval_seconds=Some(control.policy.interval_seconds);
+                    quota_reading.samples.retain(|q|q.observed_at_ms>=now-900000&&q.reset_at_ms>now);
+                    match api.heartbeat(credentials,queue.pending_count()?,config.notifications_enabled,&tracker.health,&quota_reading,control.ack.as_ref()).await {
+                        Ok(response)=>{
+                            if let Err(message)=control.accept(response,&queue){log(data_dir,message);}
+                            if control.due(now){work.reset_immediately();}
+                        }
+                        Err(error)=>{auth_blocked=error==ApiError::AuthRejected;log(data_dir,&error.to_string());}
+                    }
                 }
             }
             Some(reading)=quota_rx.recv()=>{quota_reading=reading;}

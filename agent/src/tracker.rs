@@ -16,6 +16,10 @@ pub struct Health {
     pub read_errors: usize,
     pub native_errors: usize,
     pub malformed_lines: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub collection_enabled: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub collection_interval_seconds: Option<u64>,
 }
 
 #[derive(Default)]

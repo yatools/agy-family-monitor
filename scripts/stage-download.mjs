@@ -13,6 +13,7 @@ if (existsSync(exe)) {
     ['THIRD_PARTY_NOTICES.md', 'THIRD_PARTY_NOTICES.md'],
     ['docs/INSTALLATION.md', 'INSTALLATION.md'],
     ['docs/MONITORING.md', 'MONITORING.md'],
+    ['docs/MEMBERS.md', 'MEMBERS.md'],
   ])
     copyFileSync(root + source, output + name);
   const bytes = readFileSync(exe);

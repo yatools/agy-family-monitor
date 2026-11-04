@@ -1,4 +1,15 @@
-import type { Filters, Snapshot } from './types';
+import type { Filters, Snapshot, MonitorOverview, MonitorStatus } from './types';
+export function overview(status: MonitorStatus): MonitorOverview {
+  return {
+    ready: status.ready,
+    collection_active: status.collection_active,
+    expected_members: status.config.expected_members,
+    bound_members: status.bound_members,
+    total_members: status.total_members,
+    online_members: status.online_members,
+    alerts: status.alerts,
+  };
+}
 export class ApiError extends Error {
   constructor(public status: number) {
     super(
@@ -31,17 +42,20 @@ export async function request<T>(path: string, method = 'GET', body?: unknown): 
 }
 export async function load(filters: Filters, page = 1): Promise<Snapshot> {
   const query = new URLSearchParams(Object.entries(filters).filter(([, v]) => v));
-  const [me, summary, members, usage, models, trends, alerts, rules, settings] = await Promise.all([
-    request<{ member: Snapshot['me'] }>('/me'),
-    request<Snapshot['summary']>(`/summary?${query}`),
-    request<{ items: Snapshot['members'] }>('/members'),
-    request<Snapshot['usage']>(`/usage?${query}&page=${page}&page_size=15`),
-    request<{ items: Snapshot['models'] }>(`/models?${query}`),
-    request<{ items: Snapshot['trends'] }>(`/trends?${query}`),
-    request<{ items: Snapshot['alerts'] }>('/alerts'),
-    request<{ items: Snapshot['rules'] }>('/rules'),
-    request<Snapshot['settings']>('/settings'),
-  ]);
+  const me = await request<{ member: Snapshot['me'] }>('/me');
+  const admin = me.member.role === 'admin';
+  const [summary, members, usage, models, trends, alerts, rules, settings, monitor] =
+    await Promise.all([
+      request<Snapshot['summary']>(`/summary?${query}`),
+      request<{ items: Snapshot['members'] }>('/members'),
+      request<Snapshot['usage']>(`/usage?${query}&page=${page}&page_size=15`),
+      request<{ items: Snapshot['models'] }>(`/models?${query}`),
+      request<{ items: Snapshot['trends'] }>(`/trends?${query}`),
+      request<{ items: Snapshot['alerts'] }>('/alerts'),
+      admin ? request<{ items: Snapshot['rules'] }>('/rules') : Promise.resolve({ items: [] }),
+      admin ? request<Snapshot['settings']>('/settings') : Promise.resolve(null),
+      admin ? Promise.resolve(null) : request<MonitorOverview>('/monitor/overview'),
+    ]);
   return {
     me: me.member,
     summary,
@@ -52,5 +66,6 @@ export async function load(filters: Filters, page = 1): Promise<Snapshot> {
     alerts: alerts.items,
     rules: rules.items,
     settings,
+    monitor: monitor ?? overview(settings!.monitor),
   };
 }

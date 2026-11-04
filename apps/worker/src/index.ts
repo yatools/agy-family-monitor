@@ -45,6 +45,21 @@ export function createApp(resolver?: JWTVerifyGetKey) {
       .bind(email)
       .first<Member>();
     if (!member) return c.json({ error: 'not_a_member' }, 403);
+    if (member.role !== 'admin') {
+      const viewPaths = new Set([
+        '/me',
+        '/summary',
+        '/members',
+        '/usage',
+        '/models',
+        '/trends',
+        '/alerts',
+        '/monitor/overview',
+      ]);
+      const path = new URL(c.req.url).pathname.slice('/api/v1/dashboard'.length);
+      if (!['GET', 'HEAD'].includes(c.req.method) || !viewPaths.has(path))
+        return c.json({ error: 'read_only_member' }, 403);
+    }
     if (!['GET', 'HEAD'].includes(c.req.method)) {
       const origin = c.req.header('Origin');
       if (

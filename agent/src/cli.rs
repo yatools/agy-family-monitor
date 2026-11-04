@@ -6,6 +6,8 @@ use std::{ffi::OsString, path::PathBuf};
 
 pub const HELP: &str = "Agy Family Monitor · Windows 客户端
 
+直接双击运行：首次输入管理员提供的绑定码，随后自动开启后台采集。
+
 用法：
   AgyFamilyMonitor.exe --run-once [--json]
   AgyFamilyMonitor.exe --reconcile [--cc-switch-db <文件>]
@@ -33,6 +35,7 @@ pub const HELP: &str = "Agy Family Monitor · Windows 客户端
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
+    Launch,
     Help,
     Licenses,
     Status,
@@ -59,7 +62,7 @@ pub struct Options {
 impl Options {
     pub fn parse(args: impl Iterator<Item = OsString>) -> Result<Self, &'static str> {
         let mut options = Self {
-            action: Action::Help,
+            action: Action::Launch,
             json: false,
             cc_switch_db: None,
             data_dir: None,
@@ -140,6 +143,9 @@ impl Options {
         Ok(options)
     }
 
+    pub fn has_explicit_home(&self) -> bool {
+        self.home.is_some()
+    }
     pub fn discovery(&self) -> Result<DiscoveryConfig, &'static str> {
         let mut config = if let Some(home) = &self.home {
             DiscoveryConfig {
@@ -175,6 +181,7 @@ mod tests {
     }
     #[test]
     fn accepts_explicit_actions_and_never_reads_secrets_from_command_arguments() {
+        assert_eq!(Options::parse(args(&[])).unwrap().action, Action::Launch);
         assert_eq!(
             Options::parse(args(&["--background"])).unwrap().action,
             Action::Background

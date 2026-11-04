@@ -96,6 +96,23 @@ pub fn remove() -> Result<(), &'static str> {
     }
     super::toast::remove_shortcut()
 }
+pub fn start(data_dir: &Path) -> Result<(), &'static str> {
+    let mut child = Command::new(data_dir.join("AgyFamilyMonitor.exe"));
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        child.creation_flags(0x08000000);
+    }
+    child
+        .args(["--background", "--data-dir"])
+        .arg(data_dir)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|_| "无法开启后台采集，请重新打开客户端")?;
+    Ok(())
+}
 pub fn stop() -> Result<(), &'static str> {
     if installed() {
         let _ = command("schtasks.exe")?

@@ -1,15 +1,35 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { ref, computed, watch } from 'vue';
+import AddMemberForm from '../components/AddMemberForm.vue';
+import CollectionPanel from '../components/CollectionPanel.vue';
 import MonitorPanel from '../components/MonitorPanel.vue';
 import Icon from '../components/Icon.vue';
 import { request } from '../api/client';
-import type { Snapshot } from '../api/types';
-const props = defineProps<{ data: Snapshot; demo: boolean }>();
+import type { AdminSnapshot, CollectionConfig, Member } from '../api/types';
+const props = defineProps<{ data: AdminSnapshot; demo: boolean }>();
 const emit = defineEmits<{ reload: []; notice: [message: string] }>();
 const busy = ref(false),
   code = ref(''),
   selected = ref(props.data.members[0]?.id ?? '');
-const newMember = ref({ display_name: '', email: '', role: 'member' });
+const addMemberAt = ref<'family' | 'binding' | null>(null);
+const ordinaryMembers = computed(() => props.data.members.filter((m) => m.role === 'member'));
+const bindingMember = computed(() => props.data.members.find((m) => m.id === selected.value));
+const roleName = (role: Member['role']) => (role === 'admin' ? '管理员' : '普通成员');
+function collectionChanged(config: CollectionConfig) {
+  if (props.demo) {
+    props.data.monitor.collection_active = config.enabled;
+    props.data.settings.monitor.collection_active = config.enabled;
+  }
+}
+watch(selected, () => {
+  code.value = '';
+});
+watch(
+  () => props.data.members,
+  (members) => {
+    if (!members.some((m) => m.id === selected.value)) selected.value = members[0]?.id ?? '';
+  },
+);
 const price = ref({
   model_id: '',
   input: 0,
@@ -24,7 +44,7 @@ const money = (n: number) => `$${(n / 1e6).toLocaleString('en-US', { maximumFrac
 const history = ref(false);
 const visiblePrices = computed(() => {
   if (history.value) return props.data.settings.prices;
-  const latest = new Map<string, Snapshot['settings']['prices'][number]>();
+  const latest = new Map<string, AdminSnapshot['settings']['prices'][number]>();
   for (const p of [...props.data.settings.prices].sort(
     (a, b) =>
       b.effective_from - a.effective_from ||
@@ -63,12 +83,39 @@ async function rename(id: string, name: string) {
     emit('notice', '成员名称已保存');
   });
 }
-async function addMember() {
+async function addMember(draft: { display_name: string; email: string }) {
   await act(async () => {
     if (props.data.members.length >= 6) throw new Error('家庭成员人数已达 6 人上限');
-    if (!props.demo) await request('/members', 'POST', newMember.value);
-    emit('notice', '成员已添加');
-    emit('reload');
+    const added = props.demo
+      ? { id: crypto.randomUUID() }
+      : await request<{ id: string }>('/members', 'POST', { ...draft, role: 'member' });
+    const empty = {
+      total_tokens: 0,
+      input_tokens: 0,
+      output_tokens: 0,
+      cache_read_tokens: 0,
+      cache_write_tokens: 0,
+      cost_micro_usd: 0,
+      unpriced_tokens: 0,
+      events: 0,
+    };
+    props.data.members.push({
+      ...draft,
+      id: added.id,
+      role: 'member',
+      status: 'active',
+      notifications_enabled: 1,
+      today: { ...empty },
+      week: { ...empty },
+      month: { ...empty },
+      online: false,
+      device_count: 0,
+      last_report_ms: null,
+    });
+    selected.value = added.id;
+    addMemberAt.value = null;
+    emit('notice', `已添加普通成员 ${draft.display_name}，请生成专属绑定码`);
+    if (!props.demo) emit('reload');
   });
 }
 async function enroll() {
@@ -155,6 +202,13 @@ async function copy() {
 }
 </script>
 <template>
+  <CollectionPanel
+    :collection="data.settings.collection"
+    :demo="demo"
+    @changed="collectionChanged"
+    @reload="emit('reload')"
+    @notice="emit('notice', $event)"
+  />
   <MonitorPanel
     :monitor="data.settings.monitor"
     :admin="data.me.role === 'admin'"
@@ -200,7 +254,7 @@ async function copy() {
         ><input v-model="member.display_name" aria-label="成员名称" maxlength="160" /><span
           class="muted member-email"
           >{{ member.email }}</span
-        ><span class="tag">{{ member.role === 'admin' ? '管理员' : '成员' }}</span
+        ><span class="tag">{{ roleName(member.role) }}</span
         ><button
           class="text-button"
           @click="rename(member.id, member.display_name)"
@@ -209,45 +263,67 @@ async function copy() {
           保存
         </button>
       </div>
-      <form class="form-row" @submit.prevent="addMember">
-        <input
-          v-model="newMember.display_name"
-          placeholder="成员名称"
-          aria-label="新成员名称"
-          required
-        /><input
-          v-model="newMember.email"
-          type="email"
-          placeholder="登录邮箱"
-          aria-label="新成员邮箱"
-          required
-        /><button class="button primary" :disabled="busy || data.members.length >= 6">
-          <Icon name="plus" :size="16" />添加成员
-        </button>
-      </form>
+      <div class="form-row">
+        <button
+          class="button primary"
+          :disabled="busy || data.members.length >= 6"
+          @click="addMemberAt = 'family'"
+        >
+          <Icon name="plus" :size="16" />新增普通成员</button
+        ><small class="muted">普通成员只能查看全组用量，不能进入设置或修改配置。</small>
+      </div>
+      <AddMemberForm
+        v-if="addMemberAt === 'family'"
+        :busy="busy"
+        @submit="addMember"
+        @cancel="addMemberAt = null"
+      />
       <p class="muted" style="font-size: 10px; padding: 8px 23px 12px">
-        新成员添加后，还需将其邮箱加入网站登录白名单。
+        新成员使用添加的邮箱验证码登录，网站仅允许活动成员查看。
       </p>
     </section>
     <section class="panel setting-section">
       <div class="panel-heading">
         <div>
           <h2>设备绑定</h2>
-          <p>生成一次性绑定码，在成员电脑上完成注册</p>
+          <p>选择具体成员，生成该成员专属的绑定码</p>
         </div>
         <Icon name="shield" />
       </div>
       <div class="form-row">
-        <select v-model="selected" aria-label="绑定成员">
+        <select v-model="selected" aria-label="绑定成员" :disabled="busy">
           <option v-for="member in data.members" :key="member.id" :value="member.id">
-            {{ member.display_name }}
+            {{ member.display_name }}（{{ roleName(member.role) }}）
           </option></select
-        ><button class="button primary" @click="enroll" :disabled="busy">生成绑定码</button
-        ><small class="muted">15 分钟有效 · 仅能使用一次</small>
+        ><button class="button primary" @click="enroll" :disabled="busy || !bindingMember">
+          生成绑定码
+        </button>
+        <button
+          class="button"
+          :disabled="busy || data.members.length >= 6"
+          @click="addMemberAt = 'binding'"
+        >
+          <Icon name="plus" :size="16" />新增普通成员
+        </button>
+        <small class="muted">15 分钟有效 · 仅能使用一次</small>
       </div>
+      <p v-if="!ordinaryMembers.length" class="empty-inline">
+        目前只有管理员，还没有普通成员。点击“新增普通成员”填写姓名和登录邮箱，再为其绑定设备。
+      </p>
+      <AddMemberForm
+        v-if="addMemberAt === 'binding'"
+        :busy="busy"
+        @submit="addMember"
+        @cancel="addMemberAt = null"
+      />
       <div v-if="code" class="code-box">
-        <small>{{ demo ? '演示绑定码' : '请妥善保管，本次关闭后不再显示' }}</small
-        ><code>{{ code }}</code
+        <strong
+          >{{ bindingMember?.display_name }}（{{
+            bindingMember ? roleName(bindingMember.role) : ''
+          }}）的{{ demo ? '演示' : '一次性' }}绑定码</strong
+        >
+        <small>请只发给这位成员，与同一个 EXE 一起使用；关闭后不再显示。</small>
+        <code>{{ code }}</code
         ><button class="text-button" @click="copy">复制绑定码</button>
       </div>
       <div v-for="device in data.settings.devices" :key="device.id" class="setting-row">

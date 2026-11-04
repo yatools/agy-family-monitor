@@ -15,5 +15,6 @@ try {
     Copy-Item -LiteralPath 'THIRD_PARTY_NOTICES.md','LICENSE','licenses/CC-Switch-MIT.txt' -Destination $taskOutput
     Copy-Item -LiteralPath 'docs/INSTALLATION.md' -Destination $taskOutput
     Copy-Item -LiteralPath 'docs/MONITORING.md' -Destination $taskOutput
+    Copy-Item -LiteralPath 'docs/MEMBERS.md' -Destination $taskOutput
 } finally { Pop-Location }
 

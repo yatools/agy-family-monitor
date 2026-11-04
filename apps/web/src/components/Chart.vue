@@ -7,6 +7,7 @@ import {
   TooltipComponent,
   LegendComponent,
   AriaComponent,
+  GraphicComponent,
 } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
 use([
@@ -16,6 +17,7 @@ use([
   TooltipComponent,
   LegendComponent,
   AriaComponent,
+  GraphicComponent,
   CanvasRenderer,
 ]);
 const props = defineProps<{ option: EChartsCoreOption; label: string }>();

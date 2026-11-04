@@ -5,7 +5,7 @@ import Chart from './components/Chart.vue';
 import Settings from './pages/Settings.vue';
 import { load, request, ApiError } from './api/client';
 import { snapshot, total, demoRules } from './api/demo';
-import type { Filters, Snapshot, Rule } from './api/types';
+import type { Filters, Snapshot, Rule, AdminSnapshot } from './api/types';
 import type { EChartsCoreOption } from 'echarts/core';
 import './style.css';
 
@@ -62,6 +62,17 @@ const ruleForm = ref({
   value: 1000000,
 });
 let requestVersion = 0;
+const visibleTabs = computed(() =>
+  tabs.filter((tab) => tab.id !== 'settings' || data.value?.me.role === 'admin'),
+);
+const adminData = computed<AdminSnapshot | null>(() =>
+  data.value?.me.role === 'admin' && data.value.settings
+    ? { ...data.value, settings: data.value.settings }
+    : null,
+);
+watch([route, () => data.value?.me.role], ([page, role]) => {
+  if (page === 'settings' && role === 'member') go('overview');
+});
 let noticeTimer: ReturnType<typeof setTimeout> | undefined;
 let refreshTimer: ReturnType<typeof setInterval> | undefined;
 const nf = new Intl.NumberFormat('zh-CN');
@@ -116,7 +127,7 @@ const modelList = computed(() => [
   ...new Set([
     ...knownModels.value,
     ...(data.value?.models.map((m) => m.model_id) ?? []),
-    ...(data.value?.settings.prices.map((p) => p.model_id) ?? []),
+    ...(data.value?.settings?.prices.map((p) => p.model_id) ?? []),
     ...(filters.value.model_id ? [filters.value.model_id] : []),
   ]),
 ]);
@@ -162,7 +173,7 @@ const ranking = computed(() =>
 const unread = computed(
   () =>
     (data.value?.alerts.filter((a) => !a.acknowledged).length ?? 0) +
-    (data.value?.settings.monitor.alerts.filter((a) => !a.resolved_at_ms).length ?? 0),
+    (data.value?.monitor.alerts.filter((a) => !a.resolved_at_ms).length ?? 0),
 );
 const selectedMember = computed(() => data.value?.members.find((m) => m.id === memberDetail.value));
 const colors = ['#3d7856', '#92b47b', '#bfcfa7', '#e3bb7b', '#8da9a3'];
@@ -270,7 +281,10 @@ async function refresh() {
   unauthorized.value = false;
   try {
     const result = demo.value
-      ? snapshot(filters.value, page.value)
+      ? snapshot(filters.value, page.value, {
+          role: new URLSearchParams(location.search).get('role') === 'member' ? 'member' : 'admin',
+          setup: new URLSearchParams(location.search).get('setup') === '1',
+        })
       : await load(filters.value, page.value);
     if (version === requestVersion) {
       data.value = result;
@@ -309,6 +323,7 @@ function enableDemo() {
   refresh();
 }
 async function ack(id: string) {
+  if (data.value?.me.role !== 'admin') return;
   try {
     if (!demo.value) await request(`/alerts/${id}/ack`, 'POST');
     const alert = data.value?.alerts.find((a) => a.id === id);
@@ -405,7 +420,7 @@ onBeforeUnmount(() => {
       <span class="nav-label">工作空间</span>
       <nav aria-label="主要导航">
         <a
-          v-for="tab in tabs"
+          v-for="tab in visibleTabs"
           :key="tab.id"
           :href="`#${tab.id}`"
           :class="{ active: route === tab.id }"
@@ -424,7 +439,7 @@ onBeforeUnmount(() => {
           <span class="avatar">{{ data?.me.display_name.slice(0, 1) ?? 'A' }}</span>
           <div>
             <strong>{{ data?.me.display_name ?? '家庭成员' }}</strong
-            ><small>{{ data?.me.role === 'admin' ? '家庭管理员' : '共享查看成员' }}</small>
+            ><small>{{ data?.me.role === 'admin' ? '家庭管理员' : '普通成员 · 只读' }}</small>
           </div>
           <span class="profile-status"></span>
         </div>
@@ -699,9 +714,7 @@ onBeforeUnmount(() => {
                   <span v-if="unread" class="tag amber">{{ unread }} 条未读</span>
                 </div>
                 <div
-                  v-for="alert in data.settings.monitor.alerts
-                    .filter((a) => !a.resolved_at_ms)
-                    .slice(0, 2)"
+                  v-for="alert in data.monitor.alerts.filter((a) => !a.resolved_at_ms).slice(0, 2)"
                   :key="alert.id"
                   class="recent-alert"
                 >
@@ -722,10 +735,7 @@ onBeforeUnmount(() => {
                   </div>
                 </div>
                 <p
-                  v-if="
-                    !data.alerts.length &&
-                    !data.settings.monitor.alerts.some((a) => !a.resolved_at_ms)
-                  "
+                  v-if="!data.alerts.length && !data.monitor.alerts.some((a) => !a.resolved_at_ms)"
                   class="empty-inline"
                 >
                   一切正常，暂无预警
@@ -973,13 +983,21 @@ onBeforeUnmount(() => {
               <div class="panel-heading">
                 <div>
                   <h2>共享额度异常</h2>
-                  <p>官方额度与全组独立日志对照，邮件发送记录见设置</p>
+                  <p>
+                    官方额度与全组独立日志对照{{
+                      data.me.role === 'admin' ? '，邮件发送记录见设置' : ''
+                    }}
+                  </p>
                 </div>
-                <span class="tag" :class="data.settings.monitor.ready ? 'green' : 'amber'">{{
-                  data.settings.monitor.ready ? '已启用' : '等待全员绑定'
+                <span class="tag" :class="data.monitor.ready ? 'green' : 'amber'">{{
+                  !data.monitor.collection_active
+                    ? '自动采集已暂停'
+                    : data.monitor.ready
+                      ? '已启用'
+                      : '等待全员绑定'
                 }}</span>
               </div>
-              <div v-for="alert in data.settings.monitor.alerts" :key="alert.id" class="alert-row">
+              <div v-for="alert in data.monitor.alerts" :key="alert.id" class="alert-row">
                 <div class="grow">
                   <strong>{{ alert.message }}</strong>
                   <p>
@@ -1000,12 +1018,12 @@ onBeforeUnmount(() => {
                   alert.resolved_at_ms ? '已恢复' : '异常'
                 }}</span>
               </div>
-              <p v-if="!data.settings.monitor.alerts.length" class="empty-inline">
-                暂无共享额度异常。已绑定 {{ data.settings.monitor.bound_members }} /
-                {{ data.settings.monitor.config.expected_members }} 人。
+              <p v-if="!data.monitor.alerts.length" class="empty-inline">
+                暂无共享额度异常。已绑定 {{ data.monitor.bound_members }} /
+                {{ data.monitor.expected_members }} 人。
               </p>
             </section>
-            <section class="panel setting-section">
+            <section v-if="data.me.role === 'admin'" class="panel setting-section">
               <div class="panel-heading">
                 <div>
                   <h2>预警规则</h2>
@@ -1104,13 +1122,15 @@ onBeforeUnmount(() => {
                   <p>
                     {{ timestamp(alert.created_at_ms) }} · 当前
                     {{
-                      data.rules.find((r) => r.id === alert.rule_id)?.metric === 'cost_micro_usd'
+                      (alert.metric ?? data.rules.find((r) => r.id === alert.rule_id)?.metric) ===
+                      'cost_micro_usd'
                         ? usd(alert.value)
                         : number(alert.value)
                     }}
                     / 阈值
                     {{
-                      data.rules.find((r) => r.id === alert.rule_id)?.metric === 'cost_micro_usd'
+                      (alert.metric ?? data.rules.find((r) => r.id === alert.rule_id)?.metric) ===
+                      'cost_micro_usd'
                         ? usd(alert.threshold_value)
                         : number(alert.threshold_value)
                     }}
@@ -1118,14 +1138,16 @@ onBeforeUnmount(() => {
                 </div>
                 <span v-if="alert.acknowledged" class="tag neutral"
                   ><Icon name="check" :size="13" />已读</span
-                ><button v-else class="button" @click="ack(alert.id)">标记已读</button>
+                ><button v-else-if="data.me.role === 'admin'" class="button" @click="ack(alert.id)">
+                  标记已读
+                </button>
               </div>
               <p v-if="!data.alerts.length" class="empty-inline">暂无触发记录，家庭使用情况良好</p>
             </section></template
           >
           <Settings
-            v-if="route === 'settings'"
-            :data="data"
+            v-if="route === 'settings' && adminData"
+            :data="adminData"
             :demo="demo"
             @reload="refresh"
             @notice="tell"

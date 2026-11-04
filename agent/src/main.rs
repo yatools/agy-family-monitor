@@ -2,6 +2,7 @@
 
 mod background;
 mod cli;
+mod collection;
 mod config;
 mod notifier;
 mod queue;
@@ -10,11 +11,18 @@ mod reconcile;
 mod scanner;
 mod tracker;
 mod uploader;
-mod watcher;
 mod windows;
 
 use cli::{Action, Options};
 use std::{io::Write, process::ExitCode};
+fn launch_collector(data_dir: &std::path::Path) -> Result<bool, &'static str> {
+    windows::autostart::install(data_dir)?;
+    windows::autostart::start(data_dir)?;
+    println!(
+        "后台采集已开启，下次登录会自动启动。\n你可以关闭此窗口，在家庭网站查看在线状态和用量。"
+    );
+    Ok(true)
+}
 
 async fn run() -> Result<bool, &'static str> {
     let options = Options::parse(std::env::args_os().skip(1))?;
@@ -64,8 +72,22 @@ async fn run() -> Result<bool, &'static str> {
             );
             Ok(result.status == quota::Status::Ok || result.status == quota::Status::Disabled)
         }
-        Action::Enroll => {
-            let _instance = windows::Instance::acquire(&data_dir)?;
+        Action::Enroll | Action::Launch => {
+            let instance = match windows::Instance::acquire(&data_dir) {
+                Ok(instance) => instance,
+                Err(message)
+                    if options.action == Action::Launch
+                        && message.starts_with("此客户端已在运行") =>
+                {
+                    println!("客户端已在后台采集，无需重复绑定或开启。");
+                    return Ok(true);
+                }
+                Err(message) => return Err(message),
+            };
+            if options.action == Action::Launch && local.credentials()?.is_some() {
+                drop(instance);
+                return launch_collector(&data_dir);
+            }
             if local.protected_credentials.is_some() || data_dir.join("data.db").is_file() {
                 return Err("此目录已有设备或队列，请使用原绑定或独立目录。");
             }
@@ -75,6 +97,9 @@ async fn run() -> Result<bool, &'static str> {
             let api = uploader::Api::new(&local.api_base_url)?;
             // Verify credential protection before consuming a one-time enrollment code.
             windows::dpapi::protect(b"enrollment-preflight")?;
+            if options.action == Action::Launch {
+                println!("欢迎使用 Agy Family Monitor\n请向家庭管理员取得你的专属绑定码。\n仅采集用量元数据，不上传对话、提示词或 Google 凭据。\n输入绑定码后按 Enter，即绑定这台电脑并开启后台采集；直接按 Enter 取消。");
+            }
             print!("一次性绑定码: ");
             std::io::stdout().flush().map_err(|_| "无法显示输入提示")?;
             let mut code = String::new();
@@ -82,6 +107,10 @@ async fn run() -> Result<bool, &'static str> {
                 .read_line(&mut code)
                 .map_err(|_| "无法读取绑定码")?;
             let code = code.trim();
+            if code.is_empty() && options.action == Action::Launch {
+                println!("已取消，没有绑定设备或开启采集。");
+                return Ok(true);
+            }
             if code.len() < 8 || code.len() > 256 {
                 return Err("绑定码格式无效");
             }
@@ -91,6 +120,7 @@ async fn run() -> Result<bool, &'static str> {
                 .map_err(|_| "注册失败，请检查服务器地址、绑定码有效期和网络。")?;
             local.set_credentials(&credentials)?;
             let discovery = options.discovery()?;
+            local.discovery_home = Some(discovery.home.clone());
             local.extra_roots = discovery
                 .extra_roots
                 .into_iter()
@@ -103,8 +133,13 @@ async fn run() -> Result<bool, &'static str> {
             local.save(&data_dir)?;
             std::fs::write(data_dir.join("agent.marker"), "agy-family-monitor-v1")
                 .map_err(|_| "无法保存设备目录标记")?;
-            println!("设备已绑定，凭据已由 Windows 保护。运行 --install 开启登录启动。");
-            Ok(true)
+            if options.action == Action::Launch {
+                drop(instance);
+                launch_collector(&data_dir)
+            } else {
+                println!("设备已绑定，凭据已由 Windows 保护。运行 --install 开启登录启动。");
+                Ok(true)
+            }
         }
         Action::Install => {
             if local.credentials()?.is_none() {
@@ -146,13 +181,13 @@ async fn run() -> Result<bool, &'static str> {
         Action::Background => {
             let credentials = local.credentials()?.ok_or("请先完成设备绑定")?;
             let mut discovery = options.discovery()?;
-            local.apply(&mut discovery);
+            local.apply(&mut discovery, options.has_explicit_home());
             background::run(&local, &credentials, &discovery, &data_dir).await?;
             Ok(true)
         }
         Action::RunOnce | Action::Reconcile => {
             let mut config = options.discovery()?;
-            local.apply(&mut config);
+            local.apply(&mut config, options.has_explicit_home());
             let scanned = scanner::scan(&config);
             if options.action == Action::Reconcile {
                 let path = options.cc_switch_db.unwrap_or_else(|| {
@@ -196,13 +231,19 @@ async fn run() -> Result<bool, &'static str> {
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> ExitCode {
-    windows::prepare_console(std::env::args().any(|a| a == "--background"));
-    match run().await {
+    let opened_console = windows::prepare_console(std::env::args().any(|a| a == "--background"));
+    let result = match run().await {
         Ok(true) => ExitCode::SUCCESS,
         Ok(false) => ExitCode::from(2),
         Err(message) => {
             eprintln!("{message}");
             ExitCode::FAILURE
         }
+    };
+    if opened_console {
+        println!("\n按 Enter 关闭此窗口。");
+        let mut line = String::new();
+        let _ = std::io::stdin().read_line(&mut line);
     }
+    result
 }

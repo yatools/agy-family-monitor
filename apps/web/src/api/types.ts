@@ -10,11 +10,11 @@ export type Totals = {
 };
 export type Member = {
   id: string;
-  email: string;
+  email: string | null;
   display_name: string;
   role: 'admin' | 'member';
   status: string;
-  notifications_enabled: number;
+  notifications_enabled?: number;
   today: Totals;
   week: Totals;
   month: Totals;
@@ -50,6 +50,7 @@ export type Alert = {
   threshold_value: number;
   created_at_ms: number;
   acknowledged: number;
+  metric?: 'tokens' | 'cost_micro_usd';
 };
 export type Rule = {
   id?: string;
@@ -105,6 +106,7 @@ export type MonitorAlert = {
   resolved_at_ms: number | null;
 };
 export type MonitorStatus = {
+  collection_active: boolean;
   config: MonitorConfig;
   shared_pool: boolean;
   ready: boolean;
@@ -135,8 +137,18 @@ export type Filters = {
   model_id: string;
   source: string;
 };
+export type MonitorOverview = Pick<
+  MonitorStatus,
+  'ready' | 'bound_members' | 'total_members' | 'online_members' | 'alerts' | 'collection_active'
+> & { expected_members: number };
 export type Snapshot = {
-  me: Pick<Member, 'id' | 'email' | 'display_name' | 'role' | 'notifications_enabled'>;
+  me: {
+    id: string;
+    email: string;
+    display_name: string;
+    role: 'admin' | 'member';
+    notifications_enabled: number;
+  };
   summary: {
     today: Totals;
     week: Totals;
@@ -156,11 +168,35 @@ export type Snapshot = {
   }[];
   alerts: Alert[];
   rules: Rule[];
+  monitor: MonitorOverview;
   settings: {
+    collection: CollectionStatus;
     timezone: string;
     notifications_enabled: boolean;
     prices: Price[];
     devices: Device[];
     monitor: MonitorStatus;
-  };
+  } | null;
+};
+export type AdminSnapshot = Snapshot & { settings: NonNullable<Snapshot['settings']> };
+export type CollectionConfig = { enabled: boolean; interval_seconds: number };
+export type CollectionStatus = {
+  config: CollectionConfig;
+  devices: {
+    id: string;
+    device_label: string;
+    display_name: string;
+    supported: boolean;
+    online: boolean;
+    last_scan_at_ms: number | null;
+    effective_enabled: boolean | null;
+    effective_interval_seconds: number | null;
+    pending_events: number;
+    last_request: {
+      id: string;
+      status: 'pending' | 'completed' | 'failed' | 'expired';
+      requested_at_ms: number;
+      acknowledged_at_ms: number | null;
+    } | null;
+  }[];
 };

@@ -88,6 +88,7 @@ beforeAll(async () => {
     '0002_reference_prices.sql',
     '0003_monitoring.sql',
     '0004_official_prices.sql',
+    '0005_collection_control.sql',
   ]) {
     const sql = readFileSync(
       fileURLToPath(new NodeURL(`../migrations/${file}`, import.meta.url)),
@@ -117,6 +118,7 @@ afterAll(async () => {
 });
 beforeEach(async () => {
   for (const table of [
+    'collection_requests',
     'email_outbox',
     'monitor_alerts',
     'monitor_conditions',
@@ -144,6 +146,10 @@ beforeEach(async () => {
     .run();
   await db.prepare("DELETE FROM settings WHERE key='monitor_email'").run();
   env.ALERT_EMAIL = undefined;
+  await db
+    .prepare("UPDATE settings SET value=? WHERE key='collection_config'")
+    .bind(JSON.stringify({ enabled: true, interval_seconds: 300 }))
+    .run();
   for (const id of ['admin', 'member', 'third', 'fourth', 'fifth'])
     await db
       .prepare('INSERT INTO members(id,email,display_name,role,created_at_ms) VALUES(?,?,?,?,?)')
@@ -264,7 +270,182 @@ describe('device lifecycle and authorization', () => {
       ).status,
     ).toBe(409);
   });
+  it('keeps ordinary members strictly read-only and hides all internal settings', async () => {
+    for (const path of [
+      '/summary',
+      '/members',
+      '/usage',
+      '/models',
+      '/trends',
+      '/alerts',
+      '/monitor/overview',
+    ])
+      expect((await dashboard(path, 'GET', undefined, 'member')).status, path).toBe(200);
+    const members = (await (await dashboard('/members', 'GET', undefined, 'member')).json()) as {
+      items: { email: unknown; notifications_enabled?: unknown }[];
+    };
+    expect(
+      members.items.every((m) => m.email === null && m.notifications_enabled === undefined),
+    ).toBe(true);
+    const overview = (await (
+      await dashboard('/monitor/overview', 'GET', undefined, 'member')
+    ).json()) as Record<string, unknown>;
+    expect(Object.keys(overview).sort()).toEqual([
+      'alerts',
+      'bound_members',
+      'collection_active',
+      'expected_members',
+      'online_members',
+      'ready',
+      'total_members',
+    ]);
+    for (const path of ['/settings', '/rules', '/monitor', '/collection'])
+      expect((await dashboard(path, 'GET', undefined, 'member')).status, path).toBe(403);
+    for (const [path, method] of [
+      ['/members', 'POST'],
+      ['/members/admin', 'PATCH'],
+      ['/enrollments', 'POST'],
+      ['/devices/d1', 'DELETE'],
+      ['/settings', 'PUT'],
+      ['/rules', 'PUT'],
+      ['/preferences', 'PUT'],
+      ['/alerts/anything/ack', 'POST'],
+      ['/monitor/settings', 'PUT'],
+      ['/collection/settings', 'PUT'],
+      ['/collection/run', 'POST'],
+      ['/monitor/test-email', 'POST'],
+      ['/prices', 'POST'],
+      ['/reprice', 'POST'],
+    ])
+      expect((await dashboard(path, method, {}, 'member')).status, `${method} ${path}`).toBe(403);
+    expect((await dashboard('/settings', 'GET')).status).toBe(200);
+  });
 });
+describe('administrator collection controls', () => {
+  async function heartbeat(token: string, extra: Record<string, unknown> = {}) {
+    return app.request(
+      '/api/v1/agent/heartbeat',
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          agent_version: '0.3.0',
+          pending_events: 0,
+          notifications_enabled: true,
+          ...extra,
+        }),
+      },
+      env,
+    );
+  }
+  it('synchronizes cadence and pause through authenticated heartbeats and rejects invalid settings', async () => {
+    const token = await device();
+    const initial = (await (await heartbeat(token)).json()) as any;
+    expect(initial.collection).toEqual({ enabled: true, interval_seconds: 300 });
+    expect(initial.collection_request).toBeNull();
+    expect(
+      (await dashboard('/collection/settings', 'PUT', { enabled: false, interval_seconds: 1800 }))
+        .status,
+    ).toBe(200);
+    expect(((await (await heartbeat(token)).json()) as any).collection).toEqual({
+      enabled: false,
+      interval_seconds: 1800,
+    });
+    for (const interval_seconds of [0, 59, 3601, 60.5])
+      expect(
+        (await dashboard('/collection/settings', 'PUT', { enabled: true, interval_seconds }))
+          .status,
+      ).toBe(400);
+    expect(
+      (
+        await dashboard('/collection/settings', 'PUT', {
+          enabled: true,
+          interval_seconds: 300,
+          path: 'private',
+        })
+      ).status,
+    ).toBe(400);
+    expect((await dashboard('/collection', 'GET', undefined, 'member')).status).toBe(403);
+  });
+  it('delivers one pending manual command per device, isolates acknowledgments and expires offline commands', async () => {
+    const first = await device('control-1'),
+      second = await device('control-2', 'third');
+    await heartbeat(first);
+    await heartbeat(second);
+    await dashboard('/collection/settings', 'PUT', { enabled: false, interval_seconds: 300 });
+    const responses = await Promise.all([
+      dashboard('/collection/run', 'POST', {}),
+      dashboard('/collection/run', 'POST', {}),
+    ]);
+    expect(responses.map((r) => r.status)).toEqual([202, 202]);
+    expect(
+      (
+        await db
+          .prepare("SELECT COUNT(*) AS n FROM collection_requests WHERE status='pending'")
+          .first<any>()
+      ).n,
+    ).toBe(2);
+    const command1 = ((await (await heartbeat(first)).json()) as any).collection_request;
+    const command2 = ((await (await heartbeat(second)).json()) as any).collection_request;
+    expect(command1.id).not.toBe(command2.id);
+    await heartbeat(second, { collection_ack: { request_id: command1.id, status: 'completed' } });
+    expect(
+      (
+        await db
+          .prepare('SELECT status FROM collection_requests WHERE id=?')
+          .bind(command1.id)
+          .first<any>()
+      ).status,
+    ).toBe('pending');
+    for (let i = 0; i < 2; i++)
+      expect(
+        (
+          (await (
+            await heartbeat(first, {
+              collection_ack: { request_id: command1.id, status: 'completed' },
+            })
+          ).json()) as any
+        ).collection_request,
+      ).toBeNull();
+    await db
+      .prepare('UPDATE collection_requests SET expires_at_ms=? WHERE id=?')
+      .bind(Date.now() - 1, command2.id)
+      .run();
+    expect(((await (await heartbeat(second)).json()) as any).collection_request).toBeNull();
+    expect(
+      (
+        await db
+          .prepare('SELECT status FROM collection_requests WHERE id=?')
+          .bind(command2.id)
+          .first<any>()
+      ).status,
+    ).toBe('expired');
+    expect((await dashboard('/collection/run', 'POST', { device_id: 'control-2' })).status).toBe(
+      202,
+    );
+    const status = (await (await dashboard('/collection')).json()) as any;
+    expect(status.devices.find((d: any) => d.id === 'control-1').last_request.status).toBe(
+      'completed',
+    );
+    expect(status.devices.find((d: any) => d.id === 'control-2').last_request.status).toBe(
+      'pending',
+    );
+  });
+  it('requires an active, non-revoked client supporting controls', async () => {
+    await device('legacy');
+    await db.prepare("UPDATE devices SET agent_version='0.2.0'").run();
+    expect((await dashboard('/collection/run', 'POST', {})).status).toBe(409);
+    const token = await device('revoked');
+    await heartbeat(token);
+    await db
+      .prepare("UPDATE devices SET revoked_at_ms=? WHERE id='revoked'")
+      .bind(Date.now())
+      .run();
+    expect((await dashboard('/collection/run', 'POST', { device_id: 'revoked' })).status).toBe(409);
+    expect((await dashboard('/collection/run', 'POST', { device_id: 'missing' })).status).toBe(409);
+  });
+});
+
 describe('usage, pricing and shared reports', () => {
   it('distinguishes a member with no usage from usage awaiting prices', async () => {
     const before = (await (await dashboard('/members')).json()) as any;
@@ -591,6 +772,31 @@ async function fakeMail(send: NonNullable<Env['ALERT_EMAIL']>['send']) {
 }
 
 describe('six-person shared quota monitoring and email', () => {
+  it('silences anomaly emails while paused and waits two collection cycles after resuming', async () => {
+    const now = Date.now();
+    await monitorFamily(now);
+    const sent: unknown[] = [];
+    await fakeMail(async (m) => {
+      sent.push(m);
+    });
+    await dashboard('/collection/settings', 'PUT', { enabled: false, interval_seconds: 3600 });
+    await evaluateMonitor(env, now);
+    const paused = await monitorStatus(env, now);
+    expect(paused.collection_active).toBe(false);
+    expect(paused.ready).toBe(false);
+    expect(sent).toHaveLength(0);
+    await dashboard('/collection/settings', 'PUT', { enabled: true, interval_seconds: 3600 });
+    await evaluateMonitor(env, now);
+    await touchMonitor(now + 3600000);
+    await evaluateMonitor(env, now + 3600000);
+    expect(sent).toHaveLength(0);
+    expect((await db.prepare('SELECT COUNT(*) AS n FROM monitor_alerts').first<any>()).n).toBe(0);
+    await touchMonitor(now + 7200000);
+    await evaluateMonitor(env, now + 7200000);
+    await touchMonitor(now + 7500000);
+    await evaluateMonitor(env, now + 7500000);
+    expect(sent).toHaveLength(1);
+  });
   it('retries a manual test email even before all six members are bound', async () => {
     const now = Date.now();
     const sent: unknown[] = [];
@@ -864,7 +1070,8 @@ describe('six-person shared quota monitoring and email', () => {
       (await dashboard('/monitor/settings', 'PUT', defaultMonitorConfig, 'member')).status,
     ).toBe(403);
     expect((await dashboard('/monitor/test-email', 'POST')).status).toBe(503);
-    expect((await dashboard('/monitor', 'GET', undefined, 'member')).status).toBe(200);
+    expect((await dashboard('/monitor', 'GET', undefined, 'member')).status).toBe(403);
+    expect((await dashboard('/monitor/overview', 'GET', undefined, 'member')).status).toBe(200);
   });
   it('prices the requested current model names and switches published future prices by event time', async () => {
     const sql = readFileSync(

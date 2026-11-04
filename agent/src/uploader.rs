@@ -151,11 +151,32 @@ impl Api {
         notifications: bool,
         health: &crate::tracker::Health,
         quota: &crate::quota::Poll,
-    ) -> Result<(), ApiError> {
-        let response=self.client.post(self.url("api/v1/agent/heartbeat")?).bearer_auth(&credentials.device_token)
-            .json(&serde_json::json!({"agent_version":env!("CARGO_PKG_VERSION"),"pending_events":pending,"notifications_enabled":notifications,"collector":health,"quota_status":quota.status,"quota":quota.samples}))
-            .send().await.map_err(|_|ApiError::Network)?;
-        self.success(response).await
+        ack: Option<&crate::collection::Ack>,
+    ) -> Result<crate::collection::Heartbeat, ApiError> {
+        let mut body = serde_json::json!({"agent_version":env!("CARGO_PKG_VERSION"),"pending_events":pending,"notifications_enabled":notifications,"collector":health,"quota_status":quota.status,"quota":quota.samples});
+        if let Some(ack) = ack {
+            body["collection_ack"] =
+                serde_json::to_value(ack).map_err(|_| ApiError::InvalidResponse)?;
+        }
+        let response = self
+            .client
+            .post(self.url("api/v1/agent/heartbeat")?)
+            .bearer_auth(&credentials.device_token)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|_| ApiError::Network)?;
+        let receipt: crate::collection::Heartbeat = Self::decode(response).await?;
+        if !receipt.success
+            || receipt.collection.as_ref().is_some_and(|p| !p.valid())
+            || receipt
+                .collection_request
+                .as_ref()
+                .is_some_and(|r| !r.valid())
+        {
+            return Err(ApiError::InvalidResponse);
+        }
+        Ok(receipt)
     }
     pub async fn alerts(
         &self,
@@ -261,9 +282,11 @@ mod tests {
                 0,
                 true,
                 &crate::tracker::Health::default(),
-                &crate::quota::Poll::default()
+                &crate::quota::Poll::default(),
+                None,
             )
-            .await,
+            .await
+            .map(|_| ()),
             Err(ApiError::AuthRejected)
         );
         let api = server(500, "{}").await;
@@ -273,9 +296,11 @@ mod tests {
                 0,
                 true,
                 &crate::tracker::Health::default(),
-                &crate::quota::Poll::default()
+                &crate::quota::Poll::default(),
+                None,
             )
-            .await,
+            .await
+            .map(|_| ()),
             Err(ApiError::Rejected)
         );
     }
@@ -288,9 +313,11 @@ mod tests {
                 0,
                 true,
                 &crate::tracker::Health::default(),
-                &crate::quota::Poll::default()
+                &crate::quota::Poll::default(),
+                None,
             )
-            .await,
+            .await
+            .map(|_| ()),
             Err(ApiError::Rejected)
         );
         let api = server(200, r#"{"success":false}"#).await;
@@ -300,9 +327,11 @@ mod tests {
                 0,
                 true,
                 &crate::tracker::Health::default(),
-                &crate::quota::Poll::default()
+                &crate::quota::Poll::default(),
+                None,
             )
-            .await,
+            .await
+            .map(|_| ()),
             Err(ApiError::InvalidResponse)
         );
     }

@@ -81,21 +81,22 @@ impl Instance {
     }
 }
 
-pub fn prepare_console(background: bool) {
+pub fn prepare_console(background: bool) -> bool {
     #[cfg(all(windows, not(debug_assertions)))]
     if !background {
         unsafe {
             use windows_sys::Win32::System::Console::*;
             let stdout = GetStdHandle(STD_OUTPUT_HANDLE);
             if !stdout.is_null() && stdout != windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE {
-                return;
+                return false;
             }
             if AttachConsole(ATTACH_PARENT_PROCESS) == 0 {
-                AllocConsole();
+                return AllocConsole() != 0;
             }
         }
     }
     let _ = background;
+    false
 }
 
 pub fn xml_escape(text: &str) -> String {

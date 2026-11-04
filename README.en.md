@@ -12,7 +12,7 @@ Local Windows collection · Shared dashboard · Quota calibration · Email alert
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-6e8a60?style=flat-square)](LICENSE)
 [![Windows x64](https://img.shields.io/badge/Windows-x64-52734d?style=flat-square)](docs/INSTALLATION.md)
-[![Version](https://img.shields.io/badge/version-0.2.0-8a9c70?style=flat-square)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.3.0-8a9c70?style=flat-square)](CHANGELOG.md)
 [![Checks](https://github.com/yatools/agy-family-monitor/actions/workflows/checks.yml/badge.svg?branch=main&event=push)](https://github.com/yatools/agy-family-monitor/actions/workflows/checks.yml)
 
 [Download](https://github.com/yatools/agy-family-monitor/releases/latest/download/AgyFamilyMonitor.exe) · [Quick start](#quick-start) · [Self-host](docs/DEPLOYMENT.md) · [Monitoring](docs/MONITORING.md) · [Contribute](CONTRIBUTING.md)
@@ -41,6 +41,11 @@ and original session IDs stay on each device.
 | 🏷️  | Traceable pricing        | Argon, Opus 5.5, Sonnet 5.5, Flash 3.8 and more, with sources, versions and effective dates              |
 | 🔒  | Minimal uploads          | Device-specific HMAC, Windows DPAPI, a durable local queue, Access and server-side authorization         |
 
+**Administrator-only settings, read-only members.** Add members and generate an individual code for each device.
+Collection defaults to **five minutes**. Set **1–60 minutes**, pause/resume it, or request one capture
+for all clients or one device on the website. Paused clients retain a light heartbeat and queued uploads;
+anomaly emails do not mistake intentional pauses for missing usage. See [members and collection](docs/MEMBERS.md).
+
 Filter by date, member, model and source. Set periodic thresholds, receive Windows notifications,
 revoke devices, replay offline queues and update corrected steps. Unknown prices remain **unpriced**.
 
@@ -49,9 +54,21 @@ revoke devices, replay offline queues and update corrected steps. Unknown prices
 
 ![Shared quota monitoring with synthetic demo data](docs/assets/monitoring.png)
 
-Automatic monitoring arms after all six active members have a bound device. Clients send a heartbeat
-every minute and poll official quotas every five minutes. Nonzero cost gaps require at least six
+Automatic monitoring arms after all six active members have a bound device and automatic collection is enabled.
+Clients send a heartbeat every minute and read official quotas during collection, at most once every five minutes
+for automatic requests. Nonzero cost gaps require at least six
 valid calibration samples before they can trigger a discrepancy alert.
+
+</details>
+
+<details>
+<summary><strong>Collection controls and read-only members</strong></summary>
+
+Both screenshots contain synthetic demo data only.
+
+![Collection controls](docs/assets/collection-control.png)
+
+![Read-only member view](docs/assets/member-view.png)
 
 </details>
 
@@ -60,13 +77,7 @@ valid calibration samples before they can trigger a discrepancy alert.
 ### Join an existing family
 
 You need Windows 10/11 x64 and a one-time enrollment code from your administrator.
-Download the [Windows client](https://github.com/yatools/agy-family-monitor/releases/latest/download/AgyFamilyMonitor.exe), then run:
-
-```powershell
-.\AgyFamilyMonitor.exe --enroll
-.\AgyFamilyMonitor.exe --install
-.\AgyFamilyMonitor.exe --background
-```
+Download the [Windows client](https://github.com/yatools/agy-family-monitor/releases/latest/download/AgyFamilyMonitor.exe), **double-click it and enter the enrollment code**. It configures current-user startup and begins background collection.
 
 Enter the code interactively. It expires after 15 minutes and can only be used once.
 DPAPI protects credentials for the current Windows user. Running the client requires no Node.js,
@@ -78,13 +89,13 @@ For your own server, replace the first command with:
 .\AgyFamilyMonitor.exe --enroll --server https://agent-monitor.example.com
 ```
 
-The maintainer's instance at [token.lupages.com](https://token.lupages.com) uses an Access allowlist
-and has no public registration. The downloadable client defaults to that instance; pass your own
+The maintainer's instance at [token.lupages.com](https://token.lupages.com) uses Access authentication
+and an active-member check, with no public registration. The downloadable client defaults to that instance; pass your own
 `--server` when self-hosting.
 
 ### Enable real quota calibration
 
-Upgrade all six collectors to 0.2.0. Install and sign in to the official Antigravity CLI on at least
+Upgrade all six collectors to 0.3.0. Install and sign in to the official Antigravity CLI on at least
 one computer, then check detection:
 
 ```powershell
@@ -147,7 +158,7 @@ Rust build output uses a temporary directory to avoid GNU linker limitations wit
 
 ## Validation and status
 
-Local validation on November 4, 2026: **91 tests passed**, plus Rust formatting, Clippy,
+Local validation on November 4, 2026: **99 tests passed**, plus Rust formatting, Clippy,
 TypeScript checks, production bundling and a Windows release build.
 Real Windows / CC Switch reconciliation matched **73 sessions and 1,776 events** with no counter or model differences.
 Cloudflare email delivery was confirmed by the recipient.

@@ -5,6 +5,7 @@ import { batchSchema, enrollSchema } from './schema';
 import { priced } from './pricing';
 import { evaluateAlerts } from './alerts';
 import { bucketIds } from './monitor-config';
+import { collectionConfig } from './collection';
 import type { AppEnv, Price } from './types';
 
 export const agent = new Hono<AppEnv>();
@@ -73,9 +74,14 @@ agent.post('/heartbeat', async (c) => {
           read_errors: z.int().nonnegative(),
           native_errors: z.int().nonnegative(),
           malformed_lines: z.int().nonnegative(),
+          collection_enabled: z.boolean().optional(),
+          collection_interval_seconds: z.int().min(60).max(3600).optional(),
         })
         .optional(),
       quota_status: z.enum(['ok', 'not_installed', 'error', 'disabled']).optional(),
+      collection_ack: z
+        .strictObject({ request_id: z.uuid(), status: z.enum(['completed', 'failed']) })
+        .optional(),
       quota: z
         .array(
           z.strictObject({
@@ -131,7 +137,33 @@ agent.post('/heartbeat', async (c) => {
       ),
     );
   await c.env.DB.batch(statements);
-  return c.json({ success: true });
+  if (body.collection_ack)
+    await c.env.DB.prepare(
+      "UPDATE collection_requests SET status=?,acknowledged_at_ms=? WHERE id=? AND device_id=? AND status='pending' AND expires_at_ms>?",
+    )
+      .bind(
+        body.collection_ack.status,
+        now,
+        body.collection_ack.request_id,
+        c.get('device').id,
+        now,
+      )
+      .run();
+  await c.env.DB.prepare(
+    "UPDATE collection_requests SET status='expired' WHERE device_id=? AND status='pending' AND expires_at_ms<=?",
+  )
+    .bind(c.get('device').id, now)
+    .run();
+  const request = await c.env.DB.prepare(
+    "SELECT id,requested_at_ms FROM collection_requests WHERE device_id=? AND status='pending' ORDER BY requested_at_ms,id LIMIT 1",
+  )
+    .bind(c.get('device').id)
+    .first();
+  return c.json({
+    success: true,
+    collection: await collectionConfig(c.env.DB),
+    collection_request: request,
+  });
 });
 agent.post('/events', async (c) => {
   const body = batchSchema.parse(await c.req.json());

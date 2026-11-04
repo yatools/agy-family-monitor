@@ -27,6 +27,7 @@ try {
     'quota_calibration',
     'monitor_alerts',
     'email_outbox',
+    'collection_requests',
   ].filter((table) =>
     db.prepare("SELECT 1 AS present FROM sqlite_master WHERE type='table' AND name=?").get(table),
   );

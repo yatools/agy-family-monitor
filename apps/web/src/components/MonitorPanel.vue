@@ -92,9 +92,11 @@ async function retry() {
         <p>六台设备分别采集，服务端合计，对照同一份官方额度</p>
       </div>
       <span class="tag" :class="monitor.ready ? 'green' : 'amber'">{{
-        monitor.ready
-          ? '监控已启用'
-          : `等待绑定 ${monitor.bound_members}/${monitor.config.expected_members}`
+        !monitor.collection_active
+          ? '自动采集已暂停'
+          : monitor.ready
+            ? '监控已启用'
+            : `等待绑定 ${monitor.bound_members}/${monitor.config.expected_members}`
       }}</span>
     </div>
     <div class="monitor-summary">
@@ -146,7 +148,7 @@ async function retry() {
       小时和每周是同一消耗的不同限制，金额不能相加。在线只代表客户端正在连接，电脑闲置也可能没有新用量。以上为估算，异常提醒用于核查。
     </p>
     <p v-if="!monitor.buckets.some((b) => b.latest)" class="monitor-explainer">
-      请在至少一台成员电脑安装并登录官方 Antigravity CLI，以读取共享额度。所有成员请使用 0.2.0
+      请在至少一台成员电脑安装并登录官方 Antigravity CLI，以读取共享额度。所有成员请使用 0.3.0
       客户端；没有额度读数时仍可统计 Token。
     </p>
     <template v-if="admin">

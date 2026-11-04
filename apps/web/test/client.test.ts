@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { request, ApiError } from '../src/api/client';
+import { request, ApiError, load } from '../src/api/client';
 import { total, demoRows, snapshot } from '../src/api/demo';
 afterEach(() => vi.unstubAllGlobals());
 describe('dashboard access handling', () => {
@@ -34,6 +34,39 @@ describe('dashboard access handling', () => {
   });
 });
 describe('cost and filter presentation contract', () => {
+  it('loads the member dashboard without requesting internal settings or rules', async () => {
+    const filters = {
+      from_date: '2026-11-01',
+      to_date: '2026-11-04',
+      member_id: '',
+      model_id: '',
+      source: '',
+    };
+    const view = snapshot(filters, 1, { role: 'member' });
+    const bodies: Record<string, unknown> = {
+      '/me': { member: view.me },
+      '/summary': view.summary,
+      '/members': { items: view.members },
+      '/usage': view.usage,
+      '/models': { items: view.models },
+      '/trends': { items: view.trends },
+      '/alerts': { items: view.alerts },
+      '/monitor/overview': view.monitor,
+    };
+    const fetcher = vi.fn(async (url: string) => {
+      const path = url.replace('/api/v1/dashboard', '').split('?')[0];
+      if (!(path in bodies)) throw new Error('Private endpoint requested: ' + path);
+      return { status: 200, ok: true, type: 'basic', json: async () => bodies[path] };
+    });
+    vi.stubGlobal('fetch', fetcher);
+    const result = await load(filters);
+    expect(result.settings).toBeNull();
+    expect(result.rules).toEqual([]);
+    expect(result.members).toHaveLength(6);
+    expect(result.monitor).not.toHaveProperty('config');
+    expect(result.monitor).not.toHaveProperty('email');
+    expect(result.monitor).not.toHaveProperty('buckets');
+  });
   it('distinguishes no usage from unknown prices and keeps unpriced tokens visible', () => {
     expect(total([]).cost_micro_usd).toBe(0);
     const row = { ...demoRows[0], pricing_status: 'unpriced', cost_micro_usd: null };

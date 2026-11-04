@@ -1,5 +1,17 @@
 # Changelog / 更新记录
 
+## 0.3.0 — 2026-11-04
+
+- Administrator-only settings; ordinary members have a strictly read-only family dashboard.
+- Add named members in the website and automatically select them for device enrollment.
+- Double-click enrollment installs and starts the Windows collector for the current user.
+- Website collection controls: five-minute default, 1–60 minute cadence, pause/resume and one-shot capture.
+- Durable per-device commands, idempotent acknowledgments and 15-minute offline expiration.
+- Pauses retain presence and queued uploads; anomaly baselines and grace periods follow collection settings.
+
+管理员自行添加普通成员、成员网站只读、EXE 双击绑定启动；网页调频、启停与手动采集。
+暂停仍可看在线，采集间隔与异常监控等待时间联动。
+
 ## 0.2.0 — 2026-11-04
 
 - Six members, including the administrator, share one pool; local usage is aggregated once.

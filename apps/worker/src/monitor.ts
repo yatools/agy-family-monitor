@@ -9,6 +9,7 @@ import {
 } from './monitor-config';
 import { emailConfig, emailStatement, flushEmails } from './email';
 import type { Env } from './types';
+import { collectionConfig } from './collection';
 type Device = {
   id: string;
   member_id: string;
@@ -85,9 +86,13 @@ function healthy(devices: Device[], now: number) {
         read_errors: number;
         native_errors: number;
         malformed_lines: number;
+        collection_enabled?: boolean;
+        collection_interval_seconds?: number;
       };
       return (
-        c.last_scan_at_ms > now - 180000 &&
+        c.collection_enabled !== false &&
+        c.last_scan_at_ms >
+          now - Math.max(180000, (c.collection_interval_seconds ?? 60) * 2000 + 60000) &&
         c.read_errors === 0 &&
         c.native_errors === 0 &&
         c.malformed_lines === 0
@@ -182,6 +187,8 @@ export async function calibration(db: D1Database, bucket: BucketId, config: Moni
 }
 export async function monitorStatus(env: Env, now = Date.now(), admin = false) {
   const config = await monitorConfig(env.DB);
+  const collection = await collectionConfig(env.DB);
+  const freshness = Math.max(600000, collection.interval_seconds * 2000 + 60000);
   const f = await family(env.DB, config, now);
   const [quotas, alerts, mail, addresses] = await Promise.all([
     env.DB.prepare(
@@ -202,13 +209,15 @@ export async function monitorStatus(env: Env, now = Date.now(), admin = false) {
       ...(await calibration(env.DB, id, config)),
       initial_capacity_micro_usd: config.capacities[id],
       latest:
-        quotas.results.find((q) => q.bucket_id === id && q.observed_at_ms > now - 600000) ?? null,
+        quotas.results.find((q) => q.bucket_id === id && q.observed_at_ms > now - freshness) ??
+        null,
     })),
   );
   return {
     config,
     shared_pool: true,
-    ready: f.ready,
+    ready: f.ready && collection.enabled,
+    collection_active: collection.enabled,
     bound_members: f.bound,
     total_members: f.members.length,
     online_members: [...new Set(f.online.map((d) => d.member_id))].length,
@@ -221,13 +230,19 @@ export async function monitorStatus(env: Env, now = Date.now(), admin = false) {
     },
   };
 }
-async function buildIntervals(env: Env, config: MonitorConfig, armedAt: number, now: number) {
+async function buildIntervals(
+  env: Env,
+  config: MonitorConfig,
+  armedAt: number,
+  now: number,
+  freshness = 600000,
+) {
   const conflicts = new Set<BucketId>();
   const rows = (
     await env.DB.prepare(
       "SELECT q.* FROM device_quota q JOIN devices d ON d.id=q.device_id JOIN members m ON m.id=d.member_id WHERE d.revoked_at_ms IS NULL AND m.status='active' AND q.observed_at_ms>? AND q.observed_at_ms<=? ORDER BY q.observed_at_ms DESC,q.device_id",
     )
-      .bind(now - 600000, now + 60000)
+      .bind(now - freshness, now + 60000)
       .all<Quota>()
   ).results;
   const baselines = (
@@ -268,7 +283,7 @@ async function buildIntervals(env: Env, config: MonitorConfig, armedAt: number, 
       previous.reset_at_ms !== current.reset_at_ms ||
       previous.observed_at_ms < armedAt ||
       current.remaining_ppm > previous.remaining_ppm ||
-      current.observed_at_ms - previous.observed_at_ms > 3600000
+      current.observed_at_ms - previous.observed_at_ms > Math.max(3600000, freshness)
     ) {
       await state(env.DB, `baseline:${id}`, current);
       continue;
@@ -459,9 +474,16 @@ export async function evaluateMonitor(env: Env, now = Date.now()) {
   try {
     const config = await monitorConfig(env.DB),
       f = await family(env.DB, config, now);
-    if (!f.ready) {
+    const collection = await collectionConfig(env.DB);
+    config.grace_minutes = Math.max(config.grace_minutes, collection.interval_seconds / 30);
+    config.idle_minutes = Math.max(config.idle_minutes, collection.interval_seconds / 30);
+    const freshness = Math.max(600000, collection.interval_seconds * 2000 + 60000);
+    if (!f.ready || !collection.enabled) {
       await state(env.DB, 'armed_at', null);
       await env.DB.batch([
+        env.DB.prepare(
+          "UPDATE quota_intervals SET status='skipped',reason='collection_paused_or_not_ready' WHERE status='pending'",
+        ),
         env.DB.prepare('DELETE FROM monitor_conditions'),
         env.DB.prepare(
           'UPDATE monitor_alerts SET resolved_at_ms=? WHERE resolved_at_ms IS NULL',
@@ -522,11 +544,11 @@ export async function evaluateMonitor(env: Env, now = Date.now()) {
       config,
       now,
     );
-    const conflicts = await buildIntervals(env, config, armedAt, now);
+    const conflicts = await buildIntervals(env, config, armedAt, now, freshness);
     const quotaFresh = await env.DB.prepare(
       'SELECT COUNT(*) AS n FROM device_quota q JOIN devices d ON d.id=q.device_id WHERE d.revoked_at_ms IS NULL AND q.observed_at_ms>?',
     )
-      .bind(now - 600000)
+      .bind(now - freshness)
       .first<{ n: number }>();
     await condition(
       env.DB,

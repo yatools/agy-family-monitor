@@ -1069,8 +1069,63 @@ tbody tr:last-child td {
 .form-row small {
   font-size: 10px;
 }
+.collection-form label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text);
+}
+.collection-form input[type='checkbox'] {
+  flex: none;
+  width: 16px;
+  height: 16px;
+}
+.collection-form input[type='number'] {
+  max-width: 80px;
+}
+.collection-hint {
+  margin: 10px 23px 16px;
+  font-size: 11px;
+  line-height: 1.8;
+  color: #91a081;
+}
 .setting-row + .form-row {
   padding-top: 19px;
+}
+.member-create-form {
+  margin: 12px 23px;
+  padding: 18px;
+  background: var(--soft);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 14px;
+  font-size: 12px;
+}
+.member-create-form p,
+.member-create-form small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.7;
+}
+.member-create-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
+  gap: 14px;
+}
+.member-create-fields label {
+  display: grid;
+  gap: 8px;
+}
+.member-create-fields input {
+  width: 100%;
+  min-width: 0;
+}
+.member-create-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 .code-box {
   margin: 15px 23px;

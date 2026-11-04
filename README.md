@@ -12,7 +12,7 @@ Windows 本地采集 · 家庭组共享仪表盘 · 额度校准 · 异常邮件
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-6e8a60?style=flat-square)](LICENSE)
 [![Windows x64](https://img.shields.io/badge/Windows-x64-52734d?style=flat-square)](docs/INSTALLATION.md)
-[![Version](https://img.shields.io/badge/version-0.2.0-8a9c70?style=flat-square)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.3.0-8a9c70?style=flat-square)](CHANGELOG.md)
 [![Checks](https://github.com/yatools/agy-family-monitor/actions/workflows/checks.yml/badge.svg?branch=main&event=push)](https://github.com/yatools/agy-family-monitor/actions/workflows/checks.yml)
 
 [下载客户端](https://github.com/yatools/agy-family-monitor/releases/latest/download/AgyFamilyMonitor.exe) · [快速开始](#快速开始) · [自行部署](docs/DEPLOYMENT.md) · [监控说明](docs/MONITORING.md) · [参与贡献](CONTRIBUTING.md)
@@ -40,6 +40,10 @@ Agy Family Monitor 只读取本地用量元数据，将六人的 Token 与 API �
 | 🏷️  | 可追溯的价格         | Argon、Opus 5.5、Sonnet 5.5、Flash 3.8 等；保留来源、版本与生效时间 |
 | 🔒  | 最少数据上传         | 设备专属 HMAC、Windows DPAPI、本地持久队列、Access 与服务端权限校验 |
 
+**管理员专属设置，普通成员只读。** 管理员可自行新增成员，再为每台设备生成绑定码。
+默认每 **5 分钟**采集一次，网站可设 **1–60 分钟**、暂停/恢复，或对全员/单台设备手动采集一次。
+暂停保留轻量心跳与离线补传，不触发无新用量异常邮件。详见[成员与采集控制](docs/MEMBERS.md)。
+
 还包括日期/成员/模型/来源筛选、周期预警、Windows 通知、设备撤销、离线补传、
 Step 修正和备份恢复。未知价格保留为“待计价”，不会当成免费。
 
@@ -48,8 +52,19 @@ Step 修正和备份恢复。未知价格保留为“待计价”，不会当成
 
 ![共享额度监控：合成演示数据](docs/assets/monitoring.png)
 
-六名活动成员均绑定后才启用自动监控。每分钟心跳、每五分钟读取官方额度；
+六名活动成员均绑定且启用自动采集后才启用自动监控。每分钟心跳，官方额度随采集读取（自动查询至少间隔五分钟）；
 积累至少六个有效样本后，再判断非零用量的金额缺口。
+
+</details>
+
+<details>
+<summary><strong>网站采集控制与只读成员</strong></summary>
+
+以下截图仅含合成演示数据。
+
+![Collection controls](docs/assets/collection-control.png)
+
+![Read-only member view](docs/assets/member-view.png)
 
 </details>
 
@@ -58,13 +73,7 @@ Step 修正和备份恢复。未知价格保留为“待计价”，不会当成
 ### 加入已有家庭组
 
 需要 Windows 10/11 x64，以及管理员在网站生成的一次性绑定码。
-下载 [Windows 客户端](https://github.com/yatools/agy-family-monitor/releases/latest/download/AgyFamilyMonitor.exe)，在所在目录运行：
-
-```powershell
-.\AgyFamilyMonitor.exe --enroll
-.\AgyFamilyMonitor.exe --install
-.\AgyFamilyMonitor.exe --background
-```
+下载 [Windows 客户端](https://github.com/yatools/agy-family-monitor/releases/latest/download/AgyFamilyMonitor.exe)，**双击打开并输入绑定码**，即可设置登录启动并开始后台采集。
 
 交互输入绑定码；15 分钟有效、只能使用一次。凭据由当前 Windows 用户的 DPAPI 保护。
 客户端运行无需安装 Node.js、Python、Docker 或 CC Switch。
@@ -75,12 +84,12 @@ Step 修正和备份恢复。未知价格保留为“待计价”，不会当成
 .\AgyFamilyMonitor.exe --enroll --server https://agent-monitor.example.com
 ```
 
-维护者实例：[token.lupages.com](https://token.lupages.com)，通过 Access 允许列表登录，不开放公共注册。
+维护者实例：[token.lupages.com](https://token.lupages.com)，通过 Access 验证身份，再由服务器校验活动成员，不开放公共注册。
 默认客户端连接该实例；自行部署时请显式指定自己的 `--server`。
 
 ### 启用真实额度校准
 
-六人全部使用 0.2.0 客户端，至少一台电脑安装并登录官方 Antigravity CLI：
+六人全部使用 0.3.0 客户端，至少一台电脑安装并登录官方 Antigravity CLI：
 
 ```powershell
 .\AgyFamilyMonitor.exe --check-quota
@@ -137,7 +146,7 @@ node scripts/fetch-rust.mjs fetch --locked
 
 ## 质量与当前进度
 
-2026-11-04 本机检查：**91 项测试通过**，Rust 格式与 Clippy、TypeScript 检查、
+2026-11-04 本机检查：**99 项测试通过**，Rust 格式与 Clippy、TypeScript 检查、
 生产打包和 Windows Release 构建通过。真实 Windows / CC Switch 对账达到 **73 个会话、1,776 个事件全匹配**。
 Cloudflare 邮件已完成实际收件验证。
 
