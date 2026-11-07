@@ -34,7 +34,7 @@ describe('dashboard access handling', () => {
   });
 });
 describe('cost and filter presentation contract', () => {
-  it('loads the member dashboard without requesting internal settings or rules', async () => {
+  it('loads the member dashboard with read-only rules without requesting internal settings', async () => {
     const filters = {
       from_date: '2026-11-01',
       to_date: '2026-11-04',
@@ -51,6 +51,7 @@ describe('cost and filter presentation contract', () => {
       '/models': { items: view.models },
       '/trends': { items: view.trends },
       '/alerts': { items: view.alerts },
+      '/rules': { items: view.rules },
       '/monitor/overview': view.monitor,
     };
     const fetcher = vi.fn(async (url: string) => {
@@ -61,7 +62,8 @@ describe('cost and filter presentation contract', () => {
     vi.stubGlobal('fetch', fetcher);
     const result = await load(filters);
     expect(result.settings).toBeNull();
-    expect(result.rules).toEqual([]);
+    expect(result.rules).toHaveLength(2);
+    expect(result.alerts.every((a) => a.metric === 'tokens')).toBe(true);
     expect(result.members).toHaveLength(6);
     expect(result.monitor).not.toHaveProperty('config');
     expect(result.monitor).not.toHaveProperty('email');

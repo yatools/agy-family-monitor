@@ -37,6 +37,18 @@ export const memberSchema = z.strictObject({
   display_name: label,
   role: z.enum(['admin', 'member']).default('member'),
 });
+export const memberPatchSchema = z
+  .strictObject({
+    display_name: label.optional(),
+    email: z
+      .email()
+      .max(254)
+      .transform((v) => v.toLowerCase())
+      .optional(),
+    status: z.enum(['active', 'inactive']).optional(),
+    notifications_enabled: z.boolean().optional(),
+  })
+  .refine((v) => Object.keys(v).length > 0);
 export const priceSchema = z.strictObject({
   model_id: label,
   input_price: integer,

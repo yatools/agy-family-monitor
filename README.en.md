@@ -12,7 +12,7 @@ Local Windows collection · Shared dashboard · Quota calibration · Email alert
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-6e8a60?style=flat-square)](LICENSE)
 [![Windows x64](https://img.shields.io/badge/Windows-x64-52734d?style=flat-square)](docs/INSTALLATION.md)
-[![Version](https://img.shields.io/badge/version-0.3.0-8a9c70?style=flat-square)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.4.0-8a9c70?style=flat-square)](CHANGELOG.md)
 [![Checks](https://github.com/yatools/agy-family-monitor/actions/workflows/checks.yml/badge.svg?branch=main&event=push)](https://github.com/yatools/agy-family-monitor/actions/workflows/checks.yml)
 
 [Download](https://github.com/yatools/agy-family-monitor/releases/latest/download/AgyFamilyMonitor.exe) · [Quick start](#quick-start) · [Self-host](docs/DEPLOYMENT.md) · [Monitoring](docs/MONITORING.md) · [Contribute](CONTRIBUTING.md)
@@ -41,7 +41,7 @@ and original session IDs stay on each device.
 | 🏷️  | Traceable pricing        | Argon, Opus 5.5, Sonnet 5.5, Flash 3.8 and more, with sources, versions and effective dates              |
 | 🔒  | Minimal uploads          | Device-specific HMAC, Windows DPAPI, a durable local queue, Access and server-side authorization         |
 
-**Administrator-only settings, read-only members.** Add members and generate an individual code for each device.
+**Administrator-only settings, member self-service.** Add/edit/soft-deactivate members and generate an individual code for each device; ordinary members can view family data, read alert rules, download the client, acknowledge their own alerts, and toggle personal notifications.
 Collection defaults to **five minutes**. Set **1–60 minutes**, pause/resume it, or request one capture
 for all clients or one device on the website. Paused clients retain a light heartbeat and queued uploads;
 anomaly emails do not mistake intentional pauses for missing usage. See [members and collection](docs/MEMBERS.md).
@@ -95,7 +95,7 @@ and an active-member check, with no public registration. The downloadable client
 
 ### Enable real quota calibration
 
-Upgrade all six collectors to 0.3.0. Install and sign in to the official Antigravity CLI on at least
+Upgrade all six collectors to 0.4.0. Install and sign in to the official Antigravity CLI on at least
 one computer, then check detection:
 
 ```powershell
@@ -158,10 +158,10 @@ Rust build output uses a temporary directory to avoid GNU linker limitations wit
 
 ## Validation and status
 
-Local validation on November 4, 2026: **99 tests passed**, plus Rust formatting, Clippy,
+Local validation on November 7, 2026: **103 tests passed** (56 Rust + 41 Worker + 6 Web), plus Rust formatting, Clippy,
 TypeScript checks, production bundling and a Windows release build.
 Real Windows / CC Switch reconciliation matched **73 sessions and 1,776 events** with no counter or model differences.
-Cloudflare email delivery was confirmed by the recipient.
+Cloudflare email delivery was confirmed by the recipient, and real sanitized usage from the local Windows client was enrolled and uploaded to production.
 
 Two independent Windows collectors, six real members' permissions and a six-device 72-hour run
 still need acceptance testing. Real quota sampling and long-term calibration require enrolled devices.

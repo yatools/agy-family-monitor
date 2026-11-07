@@ -54,10 +54,15 @@ export function createApp(resolver?: JWTVerifyGetKey) {
         '/models',
         '/trends',
         '/alerts',
+        '/rules',
         '/monitor/overview',
       ]);
       const path = new URL(c.req.url).pathname.slice('/api/v1/dashboard'.length);
-      if (!['GET', 'HEAD'].includes(c.req.method) || !viewPaths.has(path))
+      const allowedRead = ['GET', 'HEAD'].includes(c.req.method) && viewPaths.has(path);
+      const allowedAck = c.req.method === 'POST' && /^\/alerts\/[^/]+\/ack$/.test(path);
+      const allowedPref = c.req.method === 'PUT' && path === '/preferences';
+      const allowedSelfPatch = c.req.method === 'PATCH' && path === `/members/${member.id}`;
+      if (!allowedRead && !allowedAck && !allowedPref && !allowedSelfPatch)
         return c.json({ error: 'read_only_member' }, 403);
     }
     if (!['GET', 'HEAD'].includes(c.req.method)) {

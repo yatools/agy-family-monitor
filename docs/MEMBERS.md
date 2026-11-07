@@ -26,25 +26,28 @@
 双击 EXE，按提示输入管理员给的绑定码。程序保存加密凭据、设置当前用户登录启动并开始后台运行。
 不需要命令行或管理员权限。输入为空可取消，未绑定前不会开始后台上传。
 
-网站使用添加的邮箱验证身份。可查看全组总览、成员用量/在线状态、模型分析、明细与预警。
-普通成员没有设置页，也不能通过接口改成员、绑定设备、调采集、价格、邮件或预警规则。
+网站使用添加的邮箱验证身份。可查看全组总览、成员用量/在线状态、模型分析、明细、只读预警规则与预警记录，
+并可在“家庭成员”或“预警中心”直接下载 Windows 客户端、独立标记自己的预警已读、开关个人预警通知偏好。
+普通成员没有设置页，也不能通过接口改成员资料、绑定设备、调采集、价格、邮件或新增/删除预警规则。
 内部配置和其他成员邮箱不返回普通成员。网站访问需通过部署方的 Access 策略与活动成员校验。
 
 ## English
 
-The administrator creates named member accounts in Settings and generates a separate one-time code
-for each computer. The selector contains actual accounts; a new installation starts with only the administrator.
+The administrator creates named member accounts in Settings, can update member display names and emails,
+soft-deactivate/reactivate members (freeing the 6-active-member cap while preserving historical usage),
+and generates a separate one-time code for each computer.
 Send the same EXE to each member. Double-click it, enter the assigned code, and the collector installs
 for the current Windows user and starts in the background. No elevated permissions are required.
 
-Members can view family usage, presence, models, records and alerts. Only the administrator can access
-settings or change members, enrollment, collection, prices, mail and rules. The API enforces these roles.
+Members can view family usage, presence, models, records, read-only alert rules, and alerts, download the
+Windows client, acknowledge their own alerts, and toggle their personal notification preference. Only the
+administrator can access settings or change members, enrollment, collection, prices, mail and rules.
 
 Collection defaults to every five minutes and is adjustable from 1 to 60 minutes on the website.
 Pause/resume automatic collection, or request one capture for all supported clients or one device.
 Paused clients retain a light 60-second heartbeat and continue uploading already queued events.
 Settings and manual requests normally reach online clients within about one minute. Offline requests
-expire after 15 minutes; completed requests are not replayed after restart. Upgrade all clients to 0.3.0.
+expire after 15 minutes; completed requests are not replayed after restart. Upgrade all clients to 0.4.0.
 
 Anomaly monitoring waits at least two collection cycles. Pausing or changing cadence resets comparison
 baselines, so intentionally paused collection does not produce missing-usage alerts.

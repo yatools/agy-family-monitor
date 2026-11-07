@@ -55,25 +55,26 @@ Event 输入 `agy-event-v1\0` + Session ID 字节长度（大端 u64）+ Session
 
 | 方法和路径 | 权限与用途 |
 | --- | --- |
-| GET /me | 当前成员 |
+| GET /me | 当前成员（含个人 notifications_enabled） |
 | GET /summary | 今日/本周/本月汇总及时区 |
-| GET /members | 全体成员和周期汇总；普通成员不返回邮箱与通知偏好 |
+| GET /members | 全体成员和周期汇总；普通成员不返回他人邮箱与通知偏好 |
 | GET /usage | 明细筛选与分页 |
-| GET /models | 模型和成员汇总 |
+| GET /models | 模型和成员汇总（含聚合 model_display） |
 | GET /trends | 家庭时区每日趋势 |
 | GET /alerts | 全组预警与当前成员已读状态 |
-| POST /alerts/:id/ack | 仅管理员标记已读 |
-| GET /rules | 仅管理员查看规则列表 |
-| PUT /rules | 管理员保存，最多 50 条 |
+| POST /alerts/:id/ack | 当前登录成员独立标记自己的预警已读 |
+| GET /rules | 全员只读查看预警规则列表 |
+| PUT /rules | 管理员保存/编辑规则列表，最多 50 条 |
+| DELETE /rules/:id | 管理员删除单条预警规则及关联记录 |
 | GET /settings | 仅管理员；时区、价格、通知、全部设备与采集控制 |
 | PUT /settings | 管理员修改有效 IANA 时区 |
-| PUT /preferences | 仅管理员修改自己的 notifications_enabled |
-| POST /members | 管理员添加成员，活动成员最多六名 |
-| PATCH /members/:id | 管理员修改显示名称 |
-| POST /enrollments | 管理员为指定成员创建绑定码 |
+| PUT /preferences | 登录成员修改自己的 notifications_enabled |
+| POST /members | 管理员添加成员，活跃成员最多六名 |
+| PATCH /members/:id | 管理员修改姓名/邮箱/活跃状态（停用自动撤销设备与未使用绑定码并保留历史）；普通成员仅可修改自己的 notifications_enabled |
+| POST /enrollments | 管理员为指定活跃成员创建绑定码 |
 | DELETE /devices/:id | 管理员撤销设备，保留历史 |
 | POST /prices | 管理员新增不可变价格版本 |
-| POST /reprice | 管理员补算待计价历史，每页 100 条并返回游标 |
+| POST /reprice | 管理员补算待计价历史并自动重评解除已补齐价格的待计价告警 |
 
 日期 from_date/to_date 使用 YYYY-MM-DD，含首尾；可加 member_id/model_id/source。
 明细 page/page_size 分页。家庭日期转换 UTC 边界，持久时间为 UTC 毫秒。
@@ -88,10 +89,10 @@ Event 输入 `agy-event-v1\0` + Session ID 字节长度（大端 u64）+ Session
 GET /monitor 仅管理员查看共享额度配置与状态；普通成员使用脱敏的 GET /monitor/overview；PUT /monitor/settings、POST /monitor/reset-calibration、POST /monitor/test-email、POST /monitor/retry-email 仅管理员可调用。邮箱配置只返回管理员。详情见 MONITORING.md。
 
 
-## 0.3.0：只读成员与采集控制
+## 0.3.0 / 0.4.0：普通成员权限与采集控制
 
-普通成员只允许 GET/HEAD `/me`、`/summary`、`/members`、`/usage`、`/models`、`/trends`、
-`/alerts`、`/monitor/overview`，其他网站接口或所有写操作均 403 `read_only_member`。
+普通成员允许 GET/HEAD `/me`、`/summary`、`/members`、`/usage`、`/models`、`/trends`、
+`/alerts`、`/rules`、`/monitor/overview`，以及个人已读确认 `POST /alerts/:id/ack` 和个人通知开关 `PUT /preferences`（或仅修改自身 `notifications_enabled` 的 `PATCH /members/:id`）；其他管理接口均返回 403 `read_only_member`。
 概览只含 ready、collection_active、expected_members、bound_members、total_members、online_members、alerts。
 
 | 方法和路径 | 仅管理员 |
@@ -104,4 +105,4 @@ GET /monitor 仅管理员查看共享额度配置与状态；普通成员使用�
 客户端心跳可附 `collector.collection_enabled`、`collector.collection_interval_seconds` 及
 `collection_ack:{request_id:UUID,status:"completed"|"failed"}`。回执只更新认证设备自己的未过期指令。
 旧客户端忽略新字段；手动指令仅发给 0.3.0+，单设备一条待执行，15 分钟过期。
-暂停不阻止既有事件补传。改配置重建对账基线、跳过待评估窗口、解除旧条件并取消未发送的异常邮件。
+暂停不阻止既有事件补传。修改采集或对账监控配置、重置校准时均重建对账基线、跳过待评估窗口、解除旧条件并取消未发送的异常邮件。

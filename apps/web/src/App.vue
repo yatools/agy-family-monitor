@@ -61,6 +61,15 @@ const ruleForm = ref({
   period: 'day',
   value: 1000000,
 });
+const editingRuleId = ref('');
+const editRuleForm = ref({
+  scope: 'member',
+  member_id: '',
+  metric: 'tokens',
+  period: 'day',
+  value: 1000000,
+  enabled: true,
+});
 let requestVersion = 0;
 const visibleTabs = computed(() =>
   tabs.filter((tab) => tab.id !== 'settings' || data.value?.me.role === 'admin'),
@@ -69,6 +78,9 @@ const adminData = computed<AdminSnapshot | null>(() =>
   data.value?.me.role === 'admin' && data.value.settings
     ? { ...data.value, settings: data.value.settings }
     : null,
+);
+const activeMemberCount = computed(
+  () => data.value?.members.filter((m) => m.status === 'active').length ?? 0,
 );
 watch([route, () => data.value?.me.role], ([page, role]) => {
   if (page === 'settings' && role === 'member') go('overview');
@@ -107,22 +119,35 @@ const timestamp = (ms: number) =>
     hour: '2-digit',
     minute: '2-digit',
   }).format(ms);
-const modelName = (id: string) =>
-  id === 'unknown'
-    ? '未识别模型'
-    : id === 'gemini-4-argon'
-      ? 'Gemini 4 Argon'
-      : id === 'claude-opus-5-5'
-        ? 'Claude Opus 5.5'
-        : id === 'claude-sonnet-5-5'
-          ? 'Claude Sonnet 5.5'
-          : id === 'gemini-3.8-flash-high'
-            ? 'Gemini 3.8 Flash (High)'
-            : id === 'claude-opus-4-6'
-              ? 'Claude Opus 4.6'
-              : id === 'gemini-3.1-pro-preview'
-                ? 'Gemini 3.1 Pro Preview'
-                : id;
+const staticModelNames: Record<string, string> = {
+  unknown: '未识别模型',
+  'gemini-4-argon': 'Gemini 4 Argon',
+  'claude-opus-5-5': 'Claude Opus 5.5',
+  'claude-sonnet-5-5': 'Claude Sonnet 5.5',
+  'claude-opus-4-6': 'Claude Opus 4.6',
+  'claude-sonnet-4-6': 'Claude Sonnet 4.6',
+  'claude-sonnet-4-5': 'Claude Sonnet 4.5',
+  'claude-fable-5-1': 'Claude Fable 5.1',
+  'gemini-3.8-flash': 'Gemini 3.8 Flash',
+  'gemini-3.8-flash-high': 'Gemini 3.8 Flash (High)',
+  'gemini-3.8-flash-medium': 'Gemini 3.8 Flash (Medium)',
+  'gemini-3.8-flash-low': 'Gemini 3.8 Flash (Low)',
+  'gemini-3.1-pro-preview': 'Gemini 3.1 Pro Preview',
+};
+const modelDisplayMap = computed(() => {
+  const map = new Map<string, string>();
+  for (const row of data.value?.models ?? []) {
+    if (row.model_display) map.set(row.model_id, row.model_display);
+  }
+  for (const item of data.value?.usage.items ?? []) {
+    if (item.model_display && !map.has(item.model_id)) {
+      map.set(item.model_id, item.model_display);
+    }
+  }
+  return map;
+});
+const modelName = (id: string, display?: string | null) =>
+  display || modelDisplayMap.value.get(id) || staticModelNames[id] || id;
 const modelList = computed(() => [
   ...new Set([
     ...knownModels.value,
@@ -136,6 +161,7 @@ const models = computed(() => {
     string,
     {
       id: string;
+      display: string | null;
       tokens: number;
       cost: number | null;
       unpriced: number;
@@ -148,6 +174,7 @@ const models = computed(() => {
   for (const row of data.value?.models ?? []) {
     const model = groups.get(row.model_id) ?? {
       id: row.model_id,
+      display: row.model_display ?? null,
       tokens: 0,
       cost: null,
       unpriced: 0,
@@ -156,6 +183,7 @@ const models = computed(() => {
       output: 0,
       cache: 0,
     };
+    if (!model.display && row.model_display) model.display = row.model_display;
     model.tokens += row.total_tokens;
     model.input += row.input_tokens;
     model.output += row.output_tokens;
@@ -247,7 +275,7 @@ const pieOption = computed<EChartsCoreOption>(() => ({
       itemStyle: { borderRadius: 5 },
       label: { show: false },
       emphasis: { scaleSize: 5 },
-      data: models.value.map((m) => ({ name: modelName(m.id), value: m.tokens })),
+      data: models.value.map((m) => ({ name: modelName(m.id, m.display), value: m.tokens })),
     },
   ],
   graphic: [
@@ -323,7 +351,6 @@ function enableDemo() {
   refresh();
 }
 async function ack(id: string) {
-  if (data.value?.me.role !== 'admin') return;
   try {
     if (!demo.value) await request(`/alerts/${id}/ack`, 'POST');
     const alert = data.value?.alerts.find((a) => a.id === id);
@@ -333,12 +360,25 @@ async function ack(id: string) {
     tell(e instanceof Error ? e.message : '操作失败');
   }
 }
+async function toggleMyNotifications(enabled: boolean) {
+  try {
+    if (!demo.value) {
+      await request('/preferences', 'PUT', { notifications_enabled: enabled });
+    }
+    if (data.value) {
+      data.value.me.notifications_enabled = enabled ? 1 : 0;
+    }
+    tell('个人通知偏好已更新');
+  } catch (e) {
+    tell(e instanceof Error ? e.message : '更新失败');
+  }
+}
 async function saveRules(rules: Rule[]) {
   try {
     const values = rules.map((r) => ({
       id: r.id,
       scope: r.scope,
-      member_id: r.member_id,
+      member_id: r.scope === 'family' ? null : r.member_id || null,
       metric: r.metric,
       period: r.period,
       threshold_value: r.threshold_value,
@@ -362,13 +402,62 @@ function addRule() {
     {
       id: crypto.randomUUID(),
       scope: f.scope as Rule['scope'],
-      member_id: f.member_id || null,
+      member_id: f.scope === 'family' ? null : f.member_id || null,
       metric: f.metric as Rule['metric'],
       period: f.period as Rule['period'],
       threshold_value: Math.round(f.value * (f.metric === 'cost_micro_usd' ? 1e6 : 1)),
       enabled: true,
     },
   ]);
+}
+function startEditRule(rule: Rule) {
+  editingRuleId.value = rule.id ?? '';
+  editRuleForm.value = {
+    scope: rule.scope,
+    member_id: rule.member_id ?? '',
+    metric: rule.metric,
+    period: rule.period,
+    value:
+      rule.metric === 'cost_micro_usd'
+        ? Number((rule.threshold_value / 1e6).toFixed(6))
+        : rule.threshold_value,
+    enabled: !!rule.enabled,
+  };
+}
+async function saveEditRule(id?: string) {
+  if (!data.value || !id) return;
+  const f = editRuleForm.value;
+  const updated = data.value.rules.map((r) =>
+    r.id === id
+      ? {
+          ...r,
+          scope: f.scope as Rule['scope'],
+          member_id: f.scope === 'family' ? null : f.member_id || null,
+          metric: f.metric as Rule['metric'],
+          period: f.period as Rule['period'],
+          threshold_value: Math.round(f.value * (f.metric === 'cost_micro_usd' ? 1e6 : 1)),
+          enabled: !!f.enabled,
+        }
+      : r,
+  );
+  editingRuleId.value = '';
+  await saveRules(updated);
+}
+async function deleteRule(id?: string) {
+  if (!data.value || !id) return;
+  try {
+    if (!demo.value) {
+      await request(`/rules/${id}`, 'DELETE');
+    } else {
+      const idx = demoRules.findIndex((r) => r.id === id);
+      if (idx >= 0) demoRules.splice(idx, 1);
+    }
+    if (editingRuleId.value === id) editingRuleId.value = '';
+    tell('预警规则已删除');
+    await refresh();
+  } catch (e) {
+    tell(e instanceof Error ? e.message : '删除失败');
+  }
 }
 function usageFor(id: string) {
   filters.value.member_id = id;
@@ -413,7 +502,7 @@ onBeforeUnmount(() => {
         <span class="workspace-icon"><Icon name="members" :size="19" /></span>
         <div>
           <strong>我们的家庭组</strong
-          ><small>{{ data?.members.length ?? '—' }} 位成员 · 共享空间</small>
+          ><small>{{ activeMemberCount || (data?.members.length ?? '—') }} 位成员 · 共享空间</small>
         </div>
         <span class="workspace-dot"></span>
       </div>
@@ -439,7 +528,7 @@ onBeforeUnmount(() => {
           <span class="avatar">{{ data?.me.display_name.slice(0, 1) ?? 'A' }}</span>
           <div>
             <strong>{{ data?.me.display_name ?? '家庭成员' }}</strong
-            ><small>{{ data?.me.role === 'admin' ? '家庭管理员' : '普通成员 · 只读' }}</small>
+            ><small>{{ data?.me.role === 'admin' ? '家庭管理员' : '家庭成员' }}</small>
           </div>
           <span class="profile-status"></span>
         </div>
@@ -541,7 +630,8 @@ onBeforeUnmount(() => {
                 </div>
                 <strong>{{ compact(data.summary.today.total_tokens) }}</strong>
                 <div class="stat-footer">
-                  <span class="status-dot"></span>全组 {{ data.members.length }} 位成员的总量
+                  <span class="status-dot"></span>全组
+                  {{ activeMemberCount || data.members.length }} 位成员的总量
                 </div>
               </article>
               <article class="stat-card">
@@ -631,7 +721,7 @@ onBeforeUnmount(() => {
                   <div v-for="(model, i) in models.slice(0, 4)" :key="model.id">
                     <span
                       ><i :style="{ background: colors[i % colors.length] }"></i
-                      >{{ modelName(model.id) }}</span
+                      >{{ modelName(model.id, model.display) }}</span
                     ><strong>{{ compact(model.tokens) }}</strong>
                   </div>
                   <p v-if="!models.length" class="empty-inline">所选时间范围暂无模型记录</p>
@@ -695,9 +785,16 @@ onBeforeUnmount(() => {
                           <span
                             class="device-state"
                             :class="{
-                              online: member.online,
+                              online: member.online && member.status === 'active',
                             }"
-                            ><i></i>{{ member.online ? '在线' : '离线' }}</span
+                            ><i></i
+                            >{{
+                              member.status !== 'active'
+                                ? '已停用'
+                                : member.online
+                                  ? '在线'
+                                  : '离线'
+                            }}</span
                           >
                         </td>
                       </tr>
@@ -748,10 +845,12 @@ onBeforeUnmount(() => {
           </template>
           <template v-if="route === 'members'"
             ><div class="section-heading">
-              <span>{{ data.members.length }} 位成员 <span class="muted">/ 全组共享查看</span></span
+              <span>{{ activeMemberCount }} 位活跃成员 <span class="muted">/ 全组共享查看</span></span
               ><button class="text-button" v-if="data.me.role === 'admin'" @click="go('settings')">
-                管理成员 <Icon name="arrow" :size="14" />
-              </button>
+                管理成员 <Icon name="arrow" :size="14" /></button
+              ><a v-else class="text-button" href="/downloads/AgyFamilyMonitor.exe" download>
+                下载 Windows 客户端 <Icon name="arrow" :size="14" />
+              </a>
             </div>
             <div class="member-grid">
               <article
@@ -763,9 +862,19 @@ onBeforeUnmount(() => {
                   <span class="avatar large" :class="`avatar-${i}`">{{
                     member.display_name.slice(0, 1)
                   }}</span
-                  ><span class="tag" :class="member.online ? 'green' : 'neutral'">{{
-                    member.online ? 'Agent 在线' : 'Agent 离线'
-                  }}</span>
+                  ><span
+                    class="tag"
+                    :class="
+                      member.status !== 'active' ? 'neutral' : member.online ? 'green' : 'neutral'
+                    "
+                    >{{
+                      member.status !== 'active'
+                        ? '已停用'
+                        : member.online
+                          ? 'Agent 在线'
+                          : 'Agent 离线'
+                    }}</span
+                  >
                 </div>
                 <h2>
                   {{ member.display_name }}
@@ -842,7 +951,7 @@ onBeforeUnmount(() => {
                       <td>{{ timestamp(row.occurred_at_ms) }}</td>
                       <td>
                         <strong>{{ row.display_name }}</strong
-                        ><small>{{ modelName(row.model_id) }}</small>
+                        ><small>{{ modelName(row.model_id, row.model_display) }}</small>
                       </td>
                       <td>
                         <span class="source-tag">{{
@@ -938,7 +1047,7 @@ onBeforeUnmount(() => {
                         <td>
                           <div class="model-cell">
                             <i :style="{ background: colors[i % colors.length] }"></i
-                            ><strong>{{ modelName(model.id) }}</strong>
+                            ><strong>{{ modelName(model.id, model.display) }}</strong>
                           </div>
                         </td>
                         <td>{{ compact(model.input) }}</td>
@@ -979,6 +1088,27 @@ onBeforeUnmount(() => {
             </section></template
           >
           <template v-if="route === 'alerts'">
+            <section v-if="data.me.role !== 'admin'" class="panel setting-section">
+              <div class="panel-heading">
+                <div>
+                  <h2>客户端与通知偏好</h2>
+                  <p>下载本机采集客户端，或管理你自己的预警提醒开关</p>
+                </div>
+                <a class="button primary" href="/downloads/AgyFamilyMonitor.exe" download>
+                  下载客户端 (.exe)
+                </a>
+              </div>
+              <label class="switch-row"
+                ><div>
+                  <strong>接收我的预警通知</strong>
+                  <small>关闭后，系统不再向你发送个人阈值预警提醒</small>
+                </div>
+                <input
+                  type="checkbox"
+                  :checked="!!data.me.notifications_enabled"
+                  @change="toggleMyNotifications(($event.target as HTMLInputElement).checked)"
+              /></label>
+            </section>
             <section class="panel setting-section">
               <div class="panel-heading">
                 <div>
@@ -1023,7 +1153,7 @@ onBeforeUnmount(() => {
                 {{ data.monitor.expected_members }} 人。
               </p>
             </section>
-            <section v-if="data.me.role === 'admin'" class="panel setting-section">
+            <section class="panel setting-section">
               <div class="panel-heading">
                 <div>
                   <h2>预警规则</h2>
@@ -1031,50 +1161,101 @@ onBeforeUnmount(() => {
                 </div>
                 <span class="tag">{{ data.rules.filter((r) => r.enabled).length }} 条生效</span>
               </div>
-              <div v-for="rule in data.rules" :key="rule.id" class="rule-row">
-                <span class="rule-icon"
-                  ><Icon :name="rule.metric === 'tokens' ? 'token' : 'dollar'"
-                /></span>
-                <div class="grow">
-                  <strong
-                    >{{
-                      rule.scope === 'family'
-                        ? '全家庭'
-                        : rule.member_id
-                          ? data.members.find((m) => m.id === rule.member_id)?.display_name
-                          : '每位成员'
-                    }}
-                    ·
-                    {{
-                      { day: '每日', week: '每周', month: '每月', rolling_24h: '滚动 24 小时' }[
-                        rule.period
-                      ]
-                    }}</strong
-                  ><small
-                    >{{
-                      rule.metric === 'tokens'
-                        ? `${number(rule.threshold_value)} Token`
-                        : usd(rule.threshold_value)
-                    }}
-                    达到后提醒</small
-                  >
-                </div>
-                <button
-                  v-if="data.me.role === 'admin'"
-                  class="toggle"
-                  :class="{ on: rule.enabled }"
-                  :aria-label="rule.enabled ? '停用规则' : '启用规则'"
-                  role="switch"
-                  :aria-checked="!!rule.enabled"
-                  @click="
-                    saveRules(
-                      data.rules.map((r) => (r.id === rule.id ? { ...r, enabled: !r.enabled } : r)),
-                    )
-                  "
+              <template v-for="rule in data.rules" :key="rule.id">
+                <form
+                  v-if="editingRuleId === rule.id && data.me.role === 'admin'"
+                  class="rule-form rule-edit-form"
+                  @submit.prevent="saveEditRule(rule.id)"
                 >
-                  <i></i></button
-                ><span v-else class="tag">{{ rule.enabled ? '生效中' : '已停用' }}</span>
-              </div>
+                  <select v-model="editRuleForm.scope" aria-label="编辑预警范围">
+                    <option value="member">每位成员</option>
+                    <option value="family">全家庭</option></select
+                  ><select
+                    v-if="editRuleForm.scope === 'member'"
+                    v-model="editRuleForm.member_id"
+                    aria-label="编辑预警指定成员"
+                  >
+                    <option value="">所有成员</option>
+                    <option v-for="m in data.members" :value="m.id" :key="m.id">
+                      {{ m.display_name }}
+                    </option></select
+                  ><select v-model="editRuleForm.period" aria-label="编辑预警周期">
+                    <option value="day">每日</option>
+                    <option value="week">每周</option>
+                    <option value="month">每月</option>
+                    <option value="rolling_24h">滚动 24 小时</option></select
+                  ><select v-model="editRuleForm.metric" aria-label="编辑预警指标">
+                    <option value="tokens">Token</option>
+                    <option value="cost_micro_usd">美元费用</option></select
+                  ><input
+                    v-model.number="editRuleForm.value"
+                    type="number"
+                    :min="editRuleForm.metric === 'tokens' ? 1 : 0.000001"
+                    :step="editRuleForm.metric === 'tokens' ? 1 : 0.000001"
+                    aria-label="编辑预警阈值"
+                    required
+                  /><button class="button primary" type="submit">保存</button
+                  ><button class="button" type="button" @click="editingRuleId = ''">取消</button>
+                </form>
+                <div v-else class="rule-row">
+                  <span class="rule-icon"
+                    ><Icon :name="rule.metric === 'tokens' ? 'token' : 'dollar'"
+                  /></span>
+                  <div class="grow">
+                    <strong
+                      >{{
+                        rule.scope === 'family'
+                          ? '全家庭'
+                          : rule.member_id
+                            ? data.members.find((m) => m.id === rule.member_id)?.display_name
+                            : '每位成员'
+                      }}
+                      ·
+                      {{
+                        { day: '每日', week: '每周', month: '每月', rolling_24h: '滚动 24 小时' }[
+                          rule.period
+                        ]
+                      }}</strong
+                    ><small
+                      >{{
+                        rule.metric === 'tokens'
+                          ? `${number(rule.threshold_value)} Token`
+                          : usd(rule.threshold_value)
+                      }}
+                      达到后提醒</small
+                    >
+                  </div>
+                  <div v-if="data.me.role === 'admin'" class="row-actions">
+                    <button class="text-button" type="button" @click="startEditRule(rule)">
+                      编辑
+                    </button>
+                    <button
+                      class="text-button danger-text"
+                      type="button"
+                      @click="deleteRule(rule.id)"
+                    >
+                      删除
+                    </button>
+                    <button
+                      class="toggle"
+                      :class="{ on: rule.enabled }"
+                      :aria-label="rule.enabled ? '停用规则' : '启用规则'"
+                      role="switch"
+                      :aria-checked="!!rule.enabled"
+                      @click="
+                        saveRules(
+                          data.rules.map((r) =>
+                            r.id === rule.id ? { ...r, enabled: !r.enabled } : r,
+                          ),
+                        )
+                      "
+                    >
+                      <i></i>
+                    </button>
+                  </div>
+                  <span v-else class="tag">{{ rule.enabled ? '生效中' : '已停用' }}</span>
+                </div>
+              </template>
               <form v-if="data.me.role === 'admin'" class="rule-form" @submit.prevent="addRule">
                 <select v-model="ruleForm.scope" aria-label="预警范围">
                   <option value="member">每位成员</option>
@@ -1105,7 +1286,11 @@ onBeforeUnmount(() => {
                   required
                 /><button class="button primary"><Icon name="plus" :size="16" />添加规则</button>
               </form>
-              <p v-if="!data.rules.length" class="empty-inline">暂无预警规则，管理员可以在此添加</p>
+              <p v-if="!data.rules.length" class="empty-inline">
+                {{
+                  data.me.role === 'admin' ? '暂无预警规则，管理员可以在此添加' : '当前暂无预警规则'
+                }}
+              </p>
             </section>
             <section class="panel">
               <div class="panel-heading">
@@ -1138,9 +1323,7 @@ onBeforeUnmount(() => {
                 </div>
                 <span v-if="alert.acknowledged" class="tag neutral"
                   ><Icon name="check" :size="13" />已读</span
-                ><button v-else-if="data.me.role === 'admin'" class="button" @click="ack(alert.id)">
-                  标记已读
-                </button>
+                ><button v-else class="button" @click="ack(alert.id)">标记已读</button>
               </div>
               <p v-if="!data.alerts.length" class="empty-inline">暂无触发记录，家庭使用情况良好</p>
             </section></template
@@ -1178,7 +1361,9 @@ onBeforeUnmount(() => {
         <div class="panel-heading">
           <div>
             <h2>{{ selectedMember.display_name }}的用量</h2>
-            <p>{{ selectedMember.email }}</p>
+            <p>
+              {{ selectedMember.email || (selectedMember.role === 'admin' ? '家庭管理员' : '家庭成员') }}
+            </p>
           </div>
           <button class="icon-button" aria-label="关闭详情" @click="memberDetail = ''">
             <Icon name="close" />

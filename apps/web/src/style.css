@@ -1043,6 +1043,10 @@ tbody tr:last-child td {
 .setting-row input {
   max-width: 150px;
 }
+.setting-row .member-email-input {
+  max-width: 210px;
+  flex: 1;
+}
 .setting-row > small,
 .setting-row .grow small {
   display: block;
@@ -1051,6 +1055,15 @@ tbody tr:last-child td {
 }
 .setting-row .text-button {
   margin-left: auto;
+}
+.row-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.row-actions .text-button {
+  margin-left: 0;
 }
 .grow {
   flex: 1;

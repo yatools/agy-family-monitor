@@ -52,7 +52,7 @@ export async function load(filters: Filters, page = 1): Promise<Snapshot> {
       request<{ items: Snapshot['models'] }>(`/models?${query}`),
       request<{ items: Snapshot['trends'] }>(`/trends?${query}`),
       request<{ items: Snapshot['alerts'] }>('/alerts'),
-      admin ? request<{ items: Snapshot['rules'] }>('/rules') : Promise.resolve({ items: [] }),
+      request<{ items: Snapshot['rules'] }>('/rules'),
       admin ? request<Snapshot['settings']>('/settings') : Promise.resolve(null),
       admin ? Promise.resolve(null) : request<MonitorOverview>('/monitor/overview'),
     ]);

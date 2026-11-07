@@ -2,14 +2,32 @@ import { Hono, type Context } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import { z } from 'zod';
 import { secret, hash } from './auth';
-import { memberSchema, priceSchema, ruleSchema } from './schema';
+import { memberPatchSchema, memberSchema, priceSchema, ruleSchema } from './schema';
 import { dateKey, midnight, periodStart, timezone } from './time';
 import { priced } from './pricing';
-import type { AppEnv, Price } from './types';
+import type { AppEnv, Member, Price } from './types';
 import { monitorConfigSchema, isOnline } from './monitor-config';
-import { monitorStatus } from './monitor';
+import { monitorStatus, reconcileRepriced } from './monitor';
 import { emailConfig, enqueueEmail, flushEmails } from './email';
 import { collectionSchema, collectionStatus, supportsControl } from './collection';
+
+function deleteRuleStatements(db: D1Database, id: string): D1PreparedStatement[] {
+  return [
+    db
+      .prepare(
+        'DELETE FROM alert_acks WHERE notification_id IN (SELECT id FROM alert_notifications WHERE rule_id=?)',
+      )
+      .bind(id),
+    db
+      .prepare(
+        'DELETE FROM dashboard_alert_acks WHERE notification_id IN (SELECT id FROM alert_notifications WHERE rule_id=?)',
+      )
+      .bind(id),
+    db.prepare('DELETE FROM alert_state WHERE rule_id=?').bind(id),
+    db.prepare('DELETE FROM alert_notifications WHERE rule_id=?').bind(id),
+    db.prepare('DELETE FROM alert_rules WHERE id=?').bind(id),
+  ];
+}
 
 const admin = (c: Context<AppEnv>) => {
   if (c.get('member').role !== 'admin') throw new HTTPException(403, { message: 'admin_required' });
@@ -174,7 +192,7 @@ dashboard.get('/usage', async (c) => {
 dashboard.get('/models', async (c) => {
   const f = await filter(c);
   const rows = await c.env.DB.prepare(
-    `SELECT model_id,member_id,${totals} FROM usage_events u WHERE ${f.sql} GROUP BY model_id,member_id ORDER BY total_tokens DESC`,
+    `SELECT model_id,MAX(model_display) AS model_display,member_id,${totals} FROM usage_events u WHERE ${f.sql} GROUP BY model_id,member_id ORDER BY total_tokens DESC`,
   )
     .bind(...f.args)
     .all();
@@ -239,14 +257,21 @@ dashboard.put('/rules', async (c) => {
   const rules = z
     .array(ruleSchema)
     .max(50)
-    .parse(await c.req.json());
-  const statements = [c.env.DB.prepare('UPDATE alert_rules SET enabled=0')];
+    .parse(await c.req.json())
+    .map((rule) => ({ ...rule, id: rule.id ?? crypto.randomUUID() }));
+  const existing = (await c.env.DB.prepare('SELECT id FROM alert_rules').all<{ id: string }>())
+    .results;
+  const keep = new Set(rules.map((r) => r.id));
+  const statements: D1PreparedStatement[] = [];
+  for (const old of existing) {
+    if (!keep.has(old.id)) statements.push(...deleteRuleStatements(c.env.DB, old.id));
+  }
   for (const rule of rules)
     statements.push(
       c.env.DB.prepare(
         'INSERT INTO alert_rules VALUES(?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET scope=excluded.scope,member_id=excluded.member_id,metric=excluded.metric,period=excluded.period,threshold_value=excluded.threshold_value,enabled=excluded.enabled',
       ).bind(
-        rule.id ?? crypto.randomUUID(),
+        rule.id,
         rule.scope,
         rule.scope === 'family' ? null : rule.member_id,
         rule.metric,
@@ -255,7 +280,17 @@ dashboard.put('/rules', async (c) => {
         Number(rule.enabled),
       ),
     );
-  await c.env.DB.batch(statements);
+  if (statements.length) await c.env.DB.batch(statements);
+  return c.json({ success: true });
+});
+dashboard.delete('/rules/:id', async (c) => {
+  admin(c);
+  const id = c.req.param('id');
+  const existing = await c.env.DB.prepare('SELECT id FROM alert_rules WHERE id=?')
+    .bind(id)
+    .first();
+  if (!existing) return c.json({ error: 'rule_not_found' }, 404);
+  await c.env.DB.batch(deleteRuleStatements(c.env.DB, id));
   return c.json({ success: true });
 });
 dashboard.post('/members', async (c) => {
@@ -271,13 +306,67 @@ dashboard.post('/members', async (c) => {
   return c.json({ id }, 201);
 });
 dashboard.patch('/members/:id', async (c) => {
-  admin(c);
-  const body = z
-    .strictObject({ display_name: z.string().trim().min(1).max(160) })
-    .parse(await c.req.json());
-  await c.env.DB.prepare('UPDATE members SET display_name=? WHERE id=?')
-    .bind(body.display_name, c.req.param('id'))
-    .run();
+  const actor = c.get('member');
+  const id = c.req.param('id');
+  const body = memberPatchSchema.parse(await c.req.json());
+  if (actor.role !== 'admin') {
+    if (
+      id !== actor.id ||
+      body.notifications_enabled === undefined ||
+      body.display_name !== undefined ||
+      body.email !== undefined ||
+      body.status !== undefined
+    )
+      throw new HTTPException(403, { message: 'read_only_member' });
+    await c.env.DB.prepare('UPDATE members SET notifications_enabled=? WHERE id=?')
+      .bind(Number(body.notifications_enabled), actor.id)
+      .run();
+    return c.json({ success: true });
+  }
+  const target = await c.env.DB.prepare(
+    'SELECT id,email,display_name,role,status,notifications_enabled FROM members WHERE id=?',
+  )
+    .bind(id)
+    .first<Member>();
+  if (!target) return c.json({ error: 'member_not_found' }, 404);
+  if (body.status === 'inactive' && (target.role === 'admin' || target.id === actor.id))
+    return c.json({ error: 'cannot_deactivate_admin' }, 400);
+  if (body.status === 'active' && target.status !== 'active') {
+    const active = await c.env.DB.prepare(
+      "SELECT count(*) AS n FROM members WHERE status='active' AND id!=?",
+    )
+      .bind(id)
+      .first<{ n: number }>();
+    if ((active?.n ?? 0) >= 6) return c.json({ error: 'family_limit_reached' }, 409);
+  }
+  const now = Date.now();
+  const statements: D1PreparedStatement[] = [
+    c.env.DB.prepare(
+      'UPDATE members SET display_name=?,email=?,status=?,notifications_enabled=? WHERE id=?',
+    ).bind(
+      body.display_name ?? target.display_name,
+      body.email ?? target.email,
+      body.status ?? target.status,
+      body.notifications_enabled === undefined
+        ? target.notifications_enabled
+        : Number(body.notifications_enabled),
+      id,
+    ),
+  ];
+  if (body.status === 'inactive' && target.status !== 'inactive') {
+    statements.push(
+      c.env.DB.prepare(
+        'UPDATE devices SET revoked_at_ms=? WHERE member_id=? AND revoked_at_ms IS NULL',
+      ).bind(now, id),
+      c.env.DB.prepare(
+        'UPDATE enrollment_codes SET expires_at_ms=? WHERE member_id=? AND used_at_ms IS NULL AND expires_at_ms>?',
+      ).bind(now, id, now),
+      c.env.DB.prepare(
+        "UPDATE collection_requests SET status='expired' WHERE status='pending' AND device_id IN (SELECT id FROM devices WHERE member_id=?)",
+      ).bind(id),
+    );
+  }
+  await c.env.DB.batch(statements);
   return c.json({ success: true });
 });
 dashboard.put('/preferences', async (c) => {
@@ -455,18 +544,33 @@ dashboard.put('/monitor/settings', async (c) => {
     c.env.DB.prepare(
       "UPDATE quota_intervals SET status='skipped',reason='configuration_changed' WHERE status='pending'",
     ),
+    c.env.DB.prepare('DELETE FROM monitor_conditions'),
+    c.env.DB.prepare(
+      'UPDATE monitor_alerts SET resolved_at_ms=? WHERE resolved_at_ms IS NULL',
+    ).bind(now),
+    c.env.DB.prepare(
+      "UPDATE email_outbox SET status='cancelled' WHERE alert_id IS NOT NULL AND status='pending'",
+    ),
   ]);
   return c.json({ success: true });
 });
 dashboard.post('/monitor/reset-calibration', async (c) => {
   admin(c);
+  const now = Date.now();
   await c.env.DB.batch([
     c.env.DB.prepare(
       "INSERT INTO monitor_runtime VALUES('calibration_cutoff',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-    ).bind(String(Date.now())),
-    c.env.DB.prepare("DELETE FROM monitor_runtime WHERE key LIKE 'baseline:%'"),
+    ).bind(String(now)),
+    c.env.DB.prepare("DELETE FROM monitor_runtime WHERE key='armed_at' OR key LIKE 'baseline:%'"),
     c.env.DB.prepare(
       "UPDATE quota_intervals SET status='skipped',reason='calibration_reset' WHERE status='pending'",
+    ),
+    c.env.DB.prepare('DELETE FROM monitor_conditions'),
+    c.env.DB.prepare(
+      'UPDATE monitor_alerts SET resolved_at_ms=? WHERE resolved_at_ms IS NULL',
+    ).bind(now),
+    c.env.DB.prepare(
+      "UPDATE email_outbox SET status='cancelled' WHERE alert_id IS NOT NULL AND status='pending'",
     ),
   ]);
   return c.json({ success: true });
@@ -542,6 +646,7 @@ dashboard.post('/reprice', async (c) => {
       );
   }
   if (updates.length) await c.env.DB.batch(updates);
+  if (updates.length || rows.length < 100) await reconcileRepriced(c.env, Date.now());
   const last = rows.at(-1);
   return c.json({
     updated: updates.length,

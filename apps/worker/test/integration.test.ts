@@ -270,7 +270,7 @@ describe('device lifecycle and authorization', () => {
       ).status,
     ).toBe(409);
   });
-  it('keeps ordinary members strictly read-only and hides all internal settings', async () => {
+  it('allows ordinary members to view rules, acknowledge their own alerts, and toggle personal notifications while reserving management for admins', async () => {
     for (const path of [
       '/summary',
       '/members',
@@ -278,6 +278,7 @@ describe('device lifecycle and authorization', () => {
       '/models',
       '/trends',
       '/alerts',
+      '/rules',
       '/monitor/overview',
     ])
       expect((await dashboard(path, 'GET', undefined, 'member')).status, path).toBe(200);
@@ -299,7 +300,44 @@ describe('device lifecycle and authorization', () => {
       'ready',
       'total_members',
     ]);
-    for (const path of ['/settings', '/rules', '/monitor', '/collection'])
+    expect(
+      (await dashboard('/preferences', 'PUT', { notifications_enabled: false }, 'member')).status,
+    ).toBe(200);
+    expect(
+      (await dashboard('/members/member', 'PATCH', { notifications_enabled: true }, 'member'))
+        .status,
+    ).toBe(200);
+    expect(
+      (await dashboard('/members/member', 'PATCH', { display_name: 'Renamed' }, 'member')).status,
+    ).toBe(403);
+    expect(
+      (await dashboard('/members/member', 'PATCH', { email: 'new@example.test' }, 'member')).status,
+    ).toBe(403);
+    expect(
+      (await dashboard('/members/member', 'PATCH', { status: 'inactive' }, 'member')).status,
+    ).toBe(403);
+    await dashboard('/rules', 'PUT', [
+      { scope: 'family', metric: 'tokens', period: 'day', threshold_value: 1, enabled: true },
+    ]);
+    await upload(await device(), [event()]);
+    const memberAlertsBefore = (await (
+      await dashboard('/alerts', 'GET', undefined, 'member')
+    ).json()) as { items: { id: string; acknowledged: number }[] };
+    expect(memberAlertsBefore.items).toHaveLength(1);
+    expect(memberAlertsBefore.items[0].acknowledged).toBe(0);
+    expect(
+      (await dashboard(`/alerts/${memberAlertsBefore.items[0].id}/ack`, 'POST', {}, 'member'))
+        .status,
+    ).toBe(200);
+    const memberAlertsAfter = (await (
+      await dashboard('/alerts', 'GET', undefined, 'member')
+    ).json()) as { items: { id: string; acknowledged: number }[] };
+    expect(memberAlertsAfter.items[0].acknowledged).toBe(1);
+    const adminAlerts = (await (await dashboard('/alerts', 'GET', undefined, 'admin')).json()) as {
+      items: { id: string; acknowledged: number }[];
+    };
+    expect(adminAlerts.items[0].acknowledged).toBe(0);
+    for (const path of ['/settings', '/monitor', '/collection'])
       expect((await dashboard(path, 'GET', undefined, 'member')).status, path).toBe(403);
     for (const [path, method] of [
       ['/members', 'POST'],
@@ -308,8 +346,7 @@ describe('device lifecycle and authorization', () => {
       ['/devices/d1', 'DELETE'],
       ['/settings', 'PUT'],
       ['/rules', 'PUT'],
-      ['/preferences', 'PUT'],
-      ['/alerts/anything/ack', 'POST'],
+      ['/rules/any-id', 'DELETE'],
       ['/monitor/settings', 'PUT'],
       ['/collection/settings', 'PUT'],
       ['/collection/run', 'POST'],
@@ -319,6 +356,102 @@ describe('device lifecycle and authorization', () => {
     ])
       expect((await dashboard(path, method, {}, 'member')).status, `${method} ${path}`).toBe(403);
     expect((await dashboard('/settings', 'GET')).status).toBe(200);
+  });
+  it('supports editing member email, soft-deactivating to free the 6-member cap, and reactivating while preserving usage history', async () => {
+    expect(
+      (
+        await dashboard('/members/member', 'PATCH', {
+          display_name: 'Member Updated',
+          email: 'member.new@example.test',
+        })
+      ).status,
+    ).toBe(200);
+    expect(
+      (await dashboard('/members/member', 'PATCH', { email: email('admin') })).status,
+    ).toBe(409);
+    expect(
+      (await dashboard('/members/admin', 'PATCH', { status: 'inactive' })).status,
+    ).toBe(400);
+    const sixth = await dashboard('/members', 'POST', {
+      email: 'sixth@example.test',
+      display_name: 'Sixth',
+    });
+    expect(sixth.status).toBe(201);
+    const sixthId = ((await sixth.json()) as { id: string }).id;
+    const sixthToken = await device('d-sixth', sixthId);
+    await db
+      .prepare(
+        "UPDATE devices SET agent_version='0.3.0',last_seen_at_ms=?,last_heartbeat_at_ms=? WHERE id='d-sixth'",
+      )
+      .bind(Date.now(), Date.now())
+      .run();
+    expect((await upload(sixthToken, [event('1', 25, 'claude-sonnet-4-6')])).status).toBe(200);
+    expect((await dashboard('/enrollments', 'POST', { member_id: sixthId })).status).toBe(201);
+    expect((await dashboard('/collection/run', 'POST', { device_id: 'd-sixth' })).status).toBe(
+      202,
+    );
+    expect(
+      (
+        await dashboard('/members', 'POST', {
+          email: 'seventh@example.test',
+          display_name: 'Seventh',
+        })
+      ).status,
+    ).toBe(409);
+    expect((await dashboard(`/members/${sixthId}`, 'PATCH', { status: 'inactive' })).status).toBe(
+      200,
+    );
+    expect((await upload(sixthToken, [event('2', 10)])).status).toBe(401);
+    expect(
+      (
+        await db
+          .prepare("SELECT status FROM collection_requests WHERE device_id='d-sixth'")
+          .first<{ status: string }>()
+      )?.status,
+    ).toBe('expired');
+    expect(
+      (
+        await db
+          .prepare('SELECT COUNT(*) AS n FROM usage_events WHERE member_id=?')
+          .bind(sixthId)
+          .first<{ n: number }>()
+      )?.n,
+    ).toBe(1);
+    expect(
+      (
+        await dashboard('/members', 'POST', {
+          email: 'seventh@example.test',
+          display_name: 'Seventh',
+        })
+      ).status,
+    ).toBe(201);
+    expect((await dashboard(`/members/${sixthId}`, 'PATCH', { status: 'active' })).status).toBe(
+      409,
+    );
+  });
+  it('supports editing and permanently deleting alert rules with dependent notifications', async () => {
+    const ruleId = '11111111-1111-4111-8111-111111111111';
+    expect(
+      (
+        await dashboard('/rules', 'PUT', [
+          {
+            id: ruleId,
+            scope: 'family',
+            metric: 'tokens',
+            period: 'day',
+            threshold_value: 1,
+            enabled: true,
+          },
+        ])
+      ).status,
+    ).toBe(200);
+    await upload(await device(), [event()]);
+    const alerts = (await (await dashboard('/alerts')).json()) as { items: { id: string }[] };
+    expect(alerts.items).toHaveLength(1);
+    expect((await dashboard(`/alerts/${alerts.items[0].id}/ack`, 'POST')).status).toBe(200);
+    expect((await dashboard(`/rules/${ruleId}`, 'DELETE')).status).toBe(200);
+    const rulesAfter = (await (await dashboard('/rules')).json()) as { items: unknown[] };
+    expect(rulesAfter.items).toHaveLength(0);
   });
 });
 describe('administrator collection controls', () => {
@@ -1213,3 +1346,136 @@ it('uses the newest inserted price when effective dates match, regardless of ver
     )?.cost_micro_usd,
   ).toBe(20);
 });
+
+it('clears pricing_incomplete alerts after repricing, resolves o3 backfill, and purges stale alerts on monitor reset', async () => {
+  const now = Date.now();
+  await monitorFamily(now);
+  const token = await hash('mon-admin');
+  expect(
+    (
+      await upload(token, [
+        { ...event('7', 1000, 'gemini-unpriced'), occurred_at_ms: now - 1200000 },
+      ])
+    ).status,
+  ).toBe(200);
+  await db
+    .prepare('INSERT INTO monitor_conditions VALUES(?,?,1)')
+    .bind('pricing_incomplete:gemini-5h', now - 300000)
+    .run();
+  await db
+    .prepare(
+      'INSERT INTO quota_intervals(id,bucket_id,device_id,started_at_ms,ended_at_ms,drop_ppm,reset_at_ms) VALUES(?,?,?,?,?,?,?)',
+    )
+    .bind(
+      'unpriced-int',
+      'gemini-5h',
+      'mon-admin',
+      now - 1800000,
+      now - 900000,
+      500000,
+      now + 86400000,
+    )
+    .run();
+  await evaluateMonitor(env, now);
+  expect(
+    (
+      await db
+        .prepare(
+          "SELECT count(*) AS n FROM monitor_alerts WHERE condition_key='pricing_incomplete:gemini-5h' AND resolved_at_ms IS NULL",
+        )
+        .first<{ n: number }>()
+    )?.n,
+  ).toBe(1);
+  expect(
+    (
+      await dashboard('/prices', 'POST', {
+        model_id: 'gemini-unpriced',
+        input_price: 1000000,
+        output_price: 1000000,
+        cache_read_price: 100000,
+        cache_write_price: 100000,
+        effective_from: 0,
+        catalog_version: 'v-reprice',
+        source: 'https://example.test/prices',
+      })
+    ).status,
+  ).toBe(201);
+  expect((await dashboard('/reprice', 'POST', {})).status).toBe(200);
+  expect(
+    (
+      await db
+        .prepare(
+          "SELECT count(*) AS n FROM monitor_alerts WHERE condition_key='pricing_incomplete:gemini-5h' AND resolved_at_ms IS NULL",
+        )
+        .first<{ n: number }>()
+    )?.n,
+  ).toBe(0);
+
+  // Verify o3 model backfill resolution for 3p-5h
+  await db
+    .prepare(
+      "INSERT INTO quota_intervals(id,bucket_id,device_id,started_at_ms,ended_at_ms,drop_ppm,reset_at_ms,status) VALUES(?,?,?,?,?,?,?,'evaluated')",
+    )
+    .bind('o3-gap', '3p-5h', 'mon-admin', now - 1800000, now - 900000, 100000, now + 86400000)
+    .run();
+  await db
+    .prepare('INSERT INTO monitor_conditions VALUES(?,?,2)')
+    .bind('quota_gap:3p-5h', now - 600000)
+    .run();
+  await db
+    .prepare(
+      "INSERT INTO monitor_alerts(id,condition_key,kind,message,details_json,created_at_ms,last_seen_at_ms) VALUES('o3-alert','quota_gap:3p-5h','quota_gap','gap','{}',?,?)",
+    )
+    .bind(now - 600000, now - 600000)
+    .run();
+  expect(
+    (await upload(token, [{ ...event('8', 1000, 'o3-mini'), occurred_at_ms: now - 1200000 }]))
+      .status,
+  ).toBe(200);
+  await db
+    .prepare(
+      "UPDATE usage_events SET pricing_status='priced',cost_micro_usd=20000000 WHERE id=?",
+    )
+    .bind('8'.repeat(64))
+    .run();
+  await evaluateMonitor(env, now + 1000);
+  expect(
+    (
+      await db
+        .prepare("SELECT resolved_at_ms FROM monitor_alerts WHERE id='o3-alert'")
+        .first<{ resolved_at_ms: number | null }>()
+    )?.resolved_at_ms,
+  ).toBeTruthy();
+
+  // Verify reset-calibration clears stale conditions, alerts, and pending alert emails
+  await db
+    .prepare('INSERT INTO monitor_conditions VALUES(?,?,2)')
+    .bind('no_usage:family', now)
+    .run();
+  await db
+    .prepare(
+      "INSERT INTO monitor_alerts(id,condition_key,kind,message,details_json,created_at_ms,last_seen_at_ms) VALUES('stale-alert','no_usage:family','no_usage','stale','{}',?,?)",
+    )
+    .bind(now, now)
+    .run();
+  await enqueueEmail(db, 'stale-mail', 'stale-alert', 'Stale', 'Stale body', now);
+  expect((await dashboard('/monitor/reset-calibration', 'POST', {})).status).toBe(200);
+  expect(
+    (await db.prepare('SELECT count(*) AS n FROM monitor_conditions').first<{ n: number }>())?.n,
+  ).toBe(0);
+  expect(
+    (
+      await db
+        .prepare("SELECT resolved_at_ms FROM monitor_alerts WHERE id='stale-alert'")
+        .first<{ resolved_at_ms: number | null }>()
+    )?.resolved_at_ms,
+  ).toBeTruthy();
+  expect(
+    (
+      await db
+        .prepare("SELECT status FROM email_outbox WHERE id='stale-mail'")
+        .first<{ status: string }>()
+    )?.status,
+  ).toBe('cancelled');
+});
+

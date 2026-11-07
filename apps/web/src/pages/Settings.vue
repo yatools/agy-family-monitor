@@ -10,10 +10,11 @@ const props = defineProps<{ data: AdminSnapshot; demo: boolean }>();
 const emit = defineEmits<{ reload: []; notice: [message: string] }>();
 const busy = ref(false),
   code = ref(''),
-  selected = ref(props.data.members[0]?.id ?? '');
+  selected = ref(props.data.members.find((m) => m.status === 'active')?.id ?? '');
 const addMemberAt = ref<'family' | 'binding' | null>(null);
-const ordinaryMembers = computed(() => props.data.members.filter((m) => m.role === 'member'));
-const bindingMember = computed(() => props.data.members.find((m) => m.id === selected.value));
+const activeMembers = computed(() => props.data.members.filter((m) => m.status === 'active'));
+const ordinaryMembers = computed(() => activeMembers.value.filter((m) => m.role === 'member'));
+const bindingMember = computed(() => activeMembers.value.find((m) => m.id === selected.value));
 const roleName = (role: Member['role']) => (role === 'admin' ? '管理员' : '普通成员');
 function collectionChanged(config: CollectionConfig) {
   if (props.demo) {
@@ -27,7 +28,8 @@ watch(selected, () => {
 watch(
   () => props.data.members,
   (members) => {
-    if (!members.some((m) => m.id === selected.value)) selected.value = members[0]?.id ?? '';
+    const active = members.filter((m) => m.status === 'active');
+    if (!active.some((m) => m.id === selected.value)) selected.value = active[0]?.id ?? '';
   },
 );
 const price = ref({
@@ -77,15 +79,53 @@ async function preference() {
     emit('notice', '通知偏好已保存');
   });
 }
-async function rename(id: string, name: string) {
+async function saveMember(member: Member) {
+  const display_name = member.display_name.trim();
+  const email = (member.email ?? '').trim().toLowerCase();
+  if (!display_name || !email) return;
   await act(async () => {
-    if (!props.demo) await request(`/members/${id}`, 'PATCH', { display_name: name });
-    emit('notice', '成员名称已保存');
+    if (!props.demo) await request(`/members/${member.id}`, 'PATCH', { display_name, email });
+    member.display_name = display_name;
+    member.email = email;
+    emit('notice', '成员信息已保存');
+    if (!props.demo) emit('reload');
+  });
+}
+async function toggleMemberStatus(member: Member) {
+  if (member.role === 'admin') return;
+  const nextStatus = member.status === 'active' ? 'inactive' : 'active';
+  if (
+    nextStatus === 'inactive' &&
+    !window.confirm(
+      '停用后将释放家庭名额，并自动撤销该成员的设备与未使用的绑定码，历史用量统计仍会保留。确认停用？',
+    )
+  )
+    return;
+  await act(async () => {
+    if (nextStatus === 'active' && activeMembers.value.length >= 6)
+      throw new Error('家庭成员人数已达 6 人上限');
+    if (!props.demo) await request(`/members/${member.id}`, 'PATCH', { status: nextStatus });
+    member.status = nextStatus;
+    if (nextStatus === 'inactive') {
+      member.online = false;
+      member.device_count = 0;
+      for (const d of props.data.settings.devices) {
+        if (d.member_id === member.id && !d.revoked_at_ms) d.revoked_at_ms = Date.now();
+      }
+      if (selected.value === member.id) selected.value = activeMembers.value[0]?.id ?? '';
+    }
+    emit(
+      'notice',
+      nextStatus === 'inactive'
+        ? `已停用成员 ${member.display_name}`
+        : `已重新启用成员 ${member.display_name}`,
+    );
+    if (!props.demo) emit('reload');
   });
 }
 async function addMember(draft: { display_name: string; email: string }) {
   await act(async () => {
-    if (props.data.members.length >= 6) throw new Error('家庭成员人数已达 6 人上限');
+    if (activeMembers.value.length >= 6) throw new Error('家庭成员人数已达 6 人上限');
     const added = props.demo
       ? { id: crypto.randomUUID() }
       : await request<{ id: string }>('/members', 'POST', { ...draft, role: 'member' });
@@ -245,32 +285,53 @@ async function copy() {
       <div class="panel-heading">
         <div>
           <h2>家庭成员</h2>
-          <p>最多 6 位成员，所有成员共享查看家庭用量</p>
+          <p>最多 6 位活跃成员，所有成员共享查看家庭用量</p>
         </div>
-        <span class="tag">{{ data.members.length }} / 6</span>
+        <span class="tag">{{ activeMembers.length }} / 6</span>
       </div>
       <div v-for="member in data.members" :key="member.id" class="setting-row">
         <span class="avatar">{{ member.display_name.slice(0, 1) }}</span
-        ><input v-model="member.display_name" aria-label="成员名称" maxlength="160" /><span
-          class="muted member-email"
-          >{{ member.email }}</span
-        ><span class="tag">{{ roleName(member.role) }}</span
-        ><button
-          class="text-button"
-          @click="rename(member.id, member.display_name)"
-          :disabled="busy || !member.display_name.trim()"
-        >
-          保存
-        </button>
+        ><input
+          v-model="member.display_name"
+          aria-label="成员名称"
+          maxlength="160"
+          :disabled="busy"
+        /><input
+          v-model="member.email"
+          type="email"
+          class="member-email-input"
+          aria-label="成员邮箱"
+          maxlength="254"
+          :disabled="busy"
+        /><span class="tag">{{ roleName(member.role) }}</span
+        ><span v-if="member.status !== 'active'" class="tag neutral">已停用</span>
+        <div class="row-actions">
+          <button
+            class="text-button"
+            @click="saveMember(member)"
+            :disabled="busy || !member.display_name.trim() || !(member.email ?? '').trim()"
+          >
+            保存
+          </button>
+          <button
+            v-if="member.role !== 'admin'"
+            class="text-button"
+            :class="{ 'danger-text': member.status === 'active' }"
+            :disabled="busy || (member.status !== 'active' && activeMembers.length >= 6)"
+            @click="toggleMemberStatus(member)"
+          >
+            {{ member.status === 'active' ? '停用' : '启用' }}
+          </button>
+        </div>
       </div>
       <div class="form-row">
         <button
           class="button primary"
-          :disabled="busy || data.members.length >= 6"
+          :disabled="busy || activeMembers.length >= 6"
           @click="addMemberAt = 'family'"
         >
           <Icon name="plus" :size="16" />新增普通成员</button
-        ><small class="muted">普通成员只能查看全组用量，不能进入设置或修改配置。</small>
+        ><small class="muted">普通成员可查看全组用量并管理个人通知，不能修改家庭配置。</small>
       </div>
       <AddMemberForm
         v-if="addMemberAt === 'family'"
@@ -279,7 +340,7 @@ async function copy() {
         @cancel="addMemberAt = null"
       />
       <p class="muted" style="font-size: 10px; padding: 8px 23px 12px">
-        新成员使用添加的邮箱验证码登录，网站仅允许活动成员查看。
+        新成员使用添加的邮箱验证码登录，网站仅允许活动成员查看。停用成员后将释放名额并保留历史统计。
       </p>
     </section>
     <section class="panel setting-section">
@@ -292,7 +353,7 @@ async function copy() {
       </div>
       <div class="form-row">
         <select v-model="selected" aria-label="绑定成员" :disabled="busy">
-          <option v-for="member in data.members" :key="member.id" :value="member.id">
+          <option v-for="member in activeMembers" :key="member.id" :value="member.id">
             {{ member.display_name }}（{{ roleName(member.role) }}）
           </option></select
         ><button class="button primary" @click="enroll" :disabled="busy || !bindingMember">
@@ -300,7 +361,7 @@ async function copy() {
         </button>
         <button
           class="button"
-          :disabled="busy || data.members.length >= 6"
+          :disabled="busy || activeMembers.length >= 6"
           @click="addMemberAt = 'binding'"
         >
           <Icon name="plus" :size="16" />新增普通成员

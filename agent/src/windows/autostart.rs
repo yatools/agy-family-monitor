@@ -47,7 +47,7 @@ fn current_sid() -> Result<String, &'static str> {
 
 fn task_xml(exe: &Path, sid: &str, data_dir: &Path) -> String {
     format!(
-        r#"<?xml version="1.0" encoding="UTF-8"?>
+        r#"<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
 <Triggers><LogonTrigger><Enabled>true</Enabled><UserId>{sid}</UserId></LogonTrigger></Triggers>
 <Principals><Principal id="Author"><UserId>{sid}</UserId><LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel></Principal></Principals>
@@ -60,17 +60,62 @@ fn task_xml(exe: &Path, sid: &str, data_dir: &Path) -> String {
     )
 }
 
+fn utf16_bytes(xml: &str) -> Vec<u8> {
+    std::iter::once(0xfeffu16)
+        .chain(xml.encode_utf16())
+        .flat_map(u16::to_le_bytes)
+        .collect()
+}
+
+pub fn same_binary(current: &Path, target: &Path) -> bool {
+    if !target.is_file() {
+        return false;
+    }
+    if current.canonicalize().ok() == target.canonicalize().ok() {
+        return true;
+    }
+    use sha2::{Digest, Sha256};
+    let Ok(a) = fs::read(current) else {
+        return false;
+    };
+    let Ok(b) = fs::read(target) else {
+        return false;
+    };
+    a.len() == b.len() && Sha256::digest(&a) == Sha256::digest(&b)
+}
+
+pub fn needs_update(data_dir: &Path) -> bool {
+    let Ok(current) = std::env::current_exe() else {
+        return false;
+    };
+    !same_binary(&current, &data_dir.join("AgyFamilyMonitor.exe"))
+}
+
 pub fn install(data_dir: &Path) -> Result<(), &'static str> {
     fs::create_dir_all(data_dir).map_err(|_| "无法创建程序目录")?;
     let current = std::env::current_exe().map_err(|_| "无法定位当前程序")?;
     let target = data_dir.join("AgyFamilyMonitor.exe");
-    if current.canonicalize().ok() != target.canonicalize().ok() {
-        fs::copy(current, &target).map_err(|_| "无法复制客户端，可能已有后台实例")?;
+    if current.canonicalize().ok() != target.canonicalize().ok()
+        && !same_binary(&current, &target)
+        && fs::copy(&current, &target).is_err()
+    {
+        stop()?;
+        let mut copied = false;
+        for _ in 0..25 {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            if fs::copy(&current, &target).is_ok() {
+                copied = true;
+                break;
+            }
+        }
+        if !copied {
+            return Err("无法复制客户端，可能已有后台实例");
+        }
     }
     super::toast::register_shortcut(&target)?;
     let xml = task_xml(&target, &current_sid()?, data_dir);
     let path = data_dir.join("autostart-task.xml");
-    fs::write(&path, xml).map_err(|_| "无法生成启动任务")?;
+    fs::write(&path, utf16_bytes(&xml)).map_err(|_| "无法生成启动任务")?;
     let result = command("schtasks.exe")?
         .args(["/Create", "/TN", TASK_NAME, "/XML"])
         .arg(&path)
@@ -97,6 +142,17 @@ pub fn remove() -> Result<(), &'static str> {
     super::toast::remove_shortcut()
 }
 pub fn start(data_dir: &Path) -> Result<(), &'static str> {
+    if installed()
+        && command("schtasks.exe")
+            .and_then(|mut c| {
+                c.args(["/Run", "/TN", TASK_NAME])
+                    .output()
+                    .map_err(|_| "任务启动失败")
+            })
+            .is_ok_and(|o| o.status.success())
+    {
+        return Ok(());
+    }
     let mut child = Command::new(data_dir.join("AgyFamilyMonitor.exe"));
     #[cfg(windows)]
     {
@@ -120,6 +176,10 @@ pub fn stop() -> Result<(), &'static str> {
             .output()
             .map_err(|_| "无法停止后台任务")?;
     }
+    let pid = format!("PID ne {}", std::process::id());
+    let _ = command("taskkill.exe")?
+        .args(["/F", "/FI", &pid, "/IM", "AgyFamilyMonitor.exe"])
+        .output();
     Ok(())
 }
 pub fn installed() -> bool {
@@ -142,10 +202,26 @@ mod tests {
             "S-1-5-21-1",
             Path::new("C:/A&B"),
         );
+        assert!(xml.contains("encoding=\"UTF-16\""));
         assert!(xml.contains("A&amp;B"));
         assert!(xml.contains("LeastPrivilege"));
         assert!(xml.contains("InteractiveToken"));
         assert!(xml.contains("--background"));
         assert!(!xml.contains("HighestAvailable"));
+        let bytes = utf16_bytes(&xml);
+        assert_eq!(&bytes[..2], &[0xff, 0xfe]);
+    }
+
+    #[test]
+    fn detects_when_installed_binary_needs_replacement() {
+        let dir = tempfile::tempdir().unwrap();
+        let current = dir.path().join("new.exe");
+        let target = dir.path().join("AgyFamilyMonitor.exe");
+        fs::write(&current, b"v2-binary-bytes").unwrap();
+        assert!(!same_binary(&current, &target));
+        fs::write(&target, b"v1-binary-bytes").unwrap();
+        assert!(!same_binary(&current, &target));
+        fs::write(&target, b"v2-binary-bytes").unwrap();
+        assert!(same_binary(&current, &target));
     }
 }

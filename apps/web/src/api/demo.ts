@@ -144,9 +144,11 @@ export function snapshot(
   }));
   const models = [...new Set(rows.map((r) => `${r.model_id}|${r.member_id}`))].map((key) => {
     const [model_id, member_id] = key.split('|');
+    const matched = rows.filter((r) => r.model_id === model_id && r.member_id === member_id);
     return {
-      ...total(rows.filter((r) => r.model_id === model_id && r.member_id === member_id)),
+      ...total(matched),
       model_id,
+      model_display: matched[0]?.model_display,
       member_id,
     };
   });
@@ -205,6 +207,7 @@ export function snapshot(
         threshold_value: 1000000,
         created_at_ms: now - 35 * 60000,
         acknowledged: 0,
+        metric: 'tokens',
       },
       {
         id: 'demo-alert-2',
@@ -216,6 +219,7 @@ export function snapshot(
         threshold_value: 1000000,
         created_at_ms: now - day - 600000,
         acknowledged: 1,
+        metric: 'tokens',
       },
     ],
     rules: demoRules.map((r) => ({ ...r })),
@@ -318,7 +322,6 @@ export function snapshot(
       ...result,
       me: { ...member, email: member.email!, notifications_enabled: 1 },
       settings: null,
-      rules: [],
       members: members.map((m) => ({ ...m, email: null, notifications_enabled: undefined })),
     };
   }

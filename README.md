@@ -12,7 +12,7 @@ Windows 本地采集 · 家庭组共享仪表盘 · 额度校准 · 异常邮件
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-6e8a60?style=flat-square)](LICENSE)
 [![Windows x64](https://img.shields.io/badge/Windows-x64-52734d?style=flat-square)](docs/INSTALLATION.md)
-[![Version](https://img.shields.io/badge/version-0.3.0-8a9c70?style=flat-square)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.4.0-8a9c70?style=flat-square)](CHANGELOG.md)
 [![Checks](https://github.com/yatools/agy-family-monitor/actions/workflows/checks.yml/badge.svg?branch=main&event=push)](https://github.com/yatools/agy-family-monitor/actions/workflows/checks.yml)
 
 [下载客户端](https://github.com/yatools/agy-family-monitor/releases/latest/download/AgyFamilyMonitor.exe) · [快速开始](#快速开始) · [自行部署](docs/DEPLOYMENT.md) · [监控说明](docs/MONITORING.md) · [参与贡献](CONTRIBUTING.md)
@@ -40,7 +40,7 @@ Agy Family Monitor 只读取本地用量元数据，将六人的 Token 与 API �
 | 🏷️  | 可追溯的价格         | Argon、Opus 5.5、Sonnet 5.5、Flash 3.8 等；保留来源、版本与生效时间 |
 | 🔒  | 最少数据上传         | 设备专属 HMAC、Windows DPAPI、本地持久队列、Access 与服务端权限校验 |
 
-**管理员专属设置，普通成员只读。** 管理员可自行新增成员，再为每台设备生成绑定码。
+**管理员专属设置，普通成员轻量自助。** 管理员可新增/修改/软停用成员，并为每台设备生成绑定码；普通成员可查看全组数据、只读查看预警规则、直接下载客户端、独立标记预警已读并开关个人通知。
 默认每 **5 分钟**采集一次，网站可设 **1–60 分钟**、暂停/恢复，或对全员/单台设备手动采集一次。
 暂停保留轻量心跳与离线补传，不触发无新用量异常邮件。详见[成员与采集控制](docs/MEMBERS.md)。
 
@@ -89,7 +89,7 @@ Step 修正和备份恢复。未知价格保留为“待计价”，不会当成
 
 ### 启用真实额度校准
 
-六人全部使用 0.3.0 客户端，至少一台电脑安装并登录官方 Antigravity CLI：
+六人全部使用 0.4.0 客户端，至少一台电脑安装并登录官方 Antigravity CLI：
 
 ```powershell
 .\AgyFamilyMonitor.exe --check-quota
@@ -146,9 +146,9 @@ node scripts/fetch-rust.mjs fetch --locked
 
 ## 质量与当前进度
 
-2026-11-04 本机检查：**99 项测试通过**，Rust 格式与 Clippy、TypeScript 检查、
+2026-11-07 本机检查：**103 项测试通过**（56 Rust + 41 Worker + 6 Web），Rust 格式与 Clippy、TypeScript 检查、
 生产打包和 Windows Release 构建通过。真实 Windows / CC Switch 对账达到 **73 个会话、1,776 个事件全匹配**。
-Cloudflare 邮件已完成实际收件验证。
+Cloudflare 邮件已完成实际收件验证，本机客户端已完成线上生产绑定与真实脱敏用量上传验证。
 
 两台独立 Windows、六人真实权限与六台设备连续 72 小时运行仍待验收。
 官方额度的真实采样和长期校准需在成员安装绑定后完成。

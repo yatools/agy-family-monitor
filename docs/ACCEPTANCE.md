@@ -1,15 +1,15 @@
 # 验收记录
 
-记录日期：2026-11-04（Asia/Shanghai）。自动化、合成联调和真实设备验收分别记录，不互相替代。
+记录日期：2026-11-07（Asia/Shanghai）。自动化、合成联调和真实设备验收分别记录，不互相替代。
 
 | 阶段 | 当前状态 | 证据与剩余条件 |
 | --- | --- | --- |
 | P0 | 已通过 | Monorepo、独立 Rust 核心、固定上游 SHA/MIT、基础构建检查 |
 | P1 | 已通过 | 真实 Windows/CC Switch 对账，最新 Release 73 个会话、1,776 个事件全匹配 |
-| P2 | 功能已实现，实机验收待完成 | 本机 Release 连接云端通过；仍需两台独立 Windows 采集、上传、重启恢复 |
+| P2 | 功能已实现，实机验收待完成 | 本机 0.4.0 Release 已真实绑定并上传 2,682 条脱敏事件；仍需第二台独立 Windows 验收 |
 | P3 | 已通过规定的模拟客户端验收 | 三设备并发不重复、100 条批次及并发重试；D1 引擎测试和线上 EXE 联调 |
 | P4 | 功能已实现，六人验收待完成 | 六页、手机布局、管理员实际 Access 登录通过；尚缺其余五名真实成员登录 |
-| P5 | 已发布 0.2.0，整体验收待完成 | Windows Release、Cloudflare 和备份导出/本地恢复；尚缺六台设备连续 72 小时 |
+| P5 | 已发布 0.4.0，整体验收待完成 | Windows Release、Cloudflare 和备份导出/本地恢复；尚缺六台设备连续 72 小时 |
 
 P1 对账通过后才开发 P2。P2 的两机验收需要云端服务，因此继续实现服务端并联调，
 未把服务可用等同于两机验收，也未将 P2、P4、P5 标为全部通过。
@@ -156,3 +156,23 @@ a648cb94afa69c6128a9eacd35550b984fcd745ab26d3f48b3b7da867fc52e6e。
 
 线上模拟设备与 EXE 的额外端到端联调未执行；不能将隔离协议测试等同于真实家庭设备验收。
 真实成员登录/绑定、官方 CLI 读数与长期校准、两台独立 Windows、六台 72 小时及云端灾备切换仍待验收。
+
+## 0.4.0：成员管理闭环、普通成员自助体验、告警恢复与本机实机接入
+
+- 56 项 Rust、41 项 Worker、6 项网页测试，共 103 项测试全部通过；cargo fmt --check、全目标全特性 Clippy（-D warnings）、前后端 TypeScript 检查与生产构建全部通过。
+- 成员管理闭环：支持管理员修改成员邮箱（含唯一性与格式校验）及昵称；支持软停用成员（status=inactive，释放 6 人活跃名额，禁止停用管理员自身，并在同一事务中撤销其名下设备、作废未使用绑定码与待执行采集指令，同时保留历史用量统计）及重新启用成员（受 6 名活跃成员上限约束）。
+- 普通成员体验与权限：普通成员可只读查看预警规则（GET /rules）、独立标记个人预警已读（POST /alerts/:id/ack）、独立切换个人本地通知偏好（PUT /preferences），并在界面顶栏与预警中心直接下载 AgyFamilyMonitor.exe 客户端；其余管理接口仍严格限制仅管理员可用。
+- 预警规则管理：支持管理员内联编辑已有预警规则及永久删除规则（DELETE /rules/:id 及 PUT /rules 差集清理，级联清理关联状态与通知记录），避免历史停用规则占用 50 条上限。
+- 对账与告警自动恢复：POST /reprice 补算历史价格后自动检查并解除已无缺价事件的 pricing_incomplete:<bucket> 告警；补齐 resolveBackfill 对 o3% 模型族的过滤条件；修改监控配置或重置校准基线时自动清理旧基线下残留的 monitor_conditions、monitor_alerts 与待发邮件。
+- 模型显示名称与客户端升级：前端动态映射全部官方价格表模型名称并优先采用后端聚合的 model_display；清理未接入编译的 watcher.rs 及 notify 依赖；修复 Windows 任务计划 XML 的 UTF-16LE BOM 编码及 schtasks.exe /Run 独立启动，支持客户端运行状态下执行 --install 或双击新版 EXE 平滑停止旧进程并覆盖升级。
+- 生产环境本机实机接入与真实脱敏用量上传验收：
+  - 本机已使用一次性绑定码完成 0.4.0 生产环境绑定（device_label = Windows PC，agent_version = 0.4.0），注册当前用户 InteractiveToken / LeastPrivilege 登录启动任务并开启后台常驻心跳与采集。
+  - 本机扫描到的 105 个会话、2,682 条真实脱敏事件（共 221,614,478 Token，含 gemini-4-argon-high、claude-opus-5.5-high、claude-sonnet-5.5-low）已全部上传至线上生产 D1 并完成计价（pricing_status = priced，等效 API 费用 130,830,785 微美元，待上传队列 pending_events = 0）。
+  - 线上 D1 实机核验确认仅存储脱敏 HMAC 标识与数值统计，不含任何本地路径、提示词、对话正文、原始会话 ID 或 Google 凭据。
+  - 本机执行 AgyFamilyMonitor.exe --check-quota 返回 status=not_installed（本机未安装官方 agy CLI，符合预期）。
+
+Windows 0.4.0 EXE：5,271,040 字节，SHA-256：
+149e73d0e2b554d4789ef198d2b5dec374c92da2b871cb2cccd15db1adf073ef。
+最终 Worker 版本：acd458e1-6eaf-4e00-bcf8-4b3a52c8d43f。
+
+其余五名真实成员绑定、官方 agy CLI 真实额度采样校准、第二台独立 Windows 及六台设备连续 72 小时运行仍待后续实机验收。

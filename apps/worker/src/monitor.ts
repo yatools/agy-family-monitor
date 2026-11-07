@@ -422,10 +422,10 @@ async function evaluateIntervals(
   }
   return intervals.length;
 }
-async function resolveBackfill(env: Env, config: MonitorConfig, now: number) {
+export async function resolveBackfill(env: Env, config: MonitorConfig, now = Date.now()) {
   const windows = (
     await env.DB.prepare(
-      "SELECT q.* FROM quota_intervals q WHERE q.status='evaluated' AND q.ended_at_ms>? AND EXISTS(SELECT 1 FROM monitor_alerts a WHERE a.condition_key='quota_gap:'||q.bucket_id AND a.resolved_at_ms IS NULL) AND q.ended_at_ms=(SELECT MAX(n.ended_at_ms) FROM quota_intervals n WHERE n.bucket_id=q.bucket_id AND n.status='evaluated') LIMIT 4",
+      "SELECT q.* FROM quota_intervals q WHERE q.status='evaluated' AND q.ended_at_ms>? AND (EXISTS(SELECT 1 FROM monitor_alerts a WHERE a.condition_key IN ('quota_gap:'||q.bucket_id,'pricing_incomplete:'||q.bucket_id) AND a.resolved_at_ms IS NULL) OR EXISTS(SELECT 1 FROM monitor_conditions c WHERE c.key IN ('quota_gap:'||q.bucket_id,'pricing_incomplete:'||q.bucket_id))) AND q.ended_at_ms=(SELECT MAX(n.ended_at_ms) FROM quota_intervals n WHERE n.bucket_id=q.bucket_id AND n.status='evaluated') LIMIT 4",
     )
       .bind(now - 86400000)
       .all<Interval & { expected_micro_usd: number }>()
@@ -434,7 +434,7 @@ async function resolveBackfill(env: Env, config: MonitorConfig, now: number) {
   const sums = await env.DB.batch(
     windows.map((row) =>
       env.DB.prepare(
-        `SELECT COALESCE(SUM(cost_micro_usd),0) AS cost,COUNT(CASE WHEN pricing_status='unpriced' THEN 1 END) AS unpriced FROM usage_events WHERE occurred_at_ms>=? AND occurred_at_ms<? AND ${row.bucket_id.startsWith('gemini') ? "(model_id LIKE 'gemini-%' OR model_id='unknown')" : "(model_id LIKE 'claude-%' OR model_id LIKE 'gpt-%' OR model_id='unknown')"}`,
+        `SELECT COALESCE(SUM(cost_micro_usd),0) AS cost,COUNT(CASE WHEN pricing_status='unpriced' OR model_id='unknown' THEN 1 END) AS unpriced FROM usage_events WHERE occurred_at_ms>=? AND occurred_at_ms<? AND ${row.bucket_id.startsWith('gemini') ? "(model_id LIKE 'gemini-%' OR model_id='unknown')" : "(model_id LIKE 'claude-%' OR model_id LIKE 'gpt-%' OR model_id LIKE 'o3%' OR model_id='unknown')"}`,
       ).bind(row.started_at_ms, row.ended_at_ms),
     ),
   );
@@ -442,24 +442,63 @@ async function resolveBackfill(env: Env, config: MonitorConfig, now: number) {
     const row = windows[i],
       sum = sums[i].results[0] as { cost: number; unpriced: number };
     const gap = Math.max(0, row.expected_micro_usd - sum.cost);
-    if (
-      sum.unpriced === 0 &&
-      (gap < config.min_gap_micro_usd || gap * 100 < row.expected_micro_usd * config.gap_percent)
-    ) {
+    if (sum.unpriced === 0) {
       await condition(
         env.DB,
-        `quota_gap:${row.bucket_id}`,
+        `pricing_incomplete:${row.bucket_id}`,
         false,
-        '补传后记录已补齐',
+        '补算后价格已补齐',
         {},
         config,
         now,
       );
-      await env.DB.prepare(
-        'UPDATE quota_intervals SET observed_micro_usd=?,gap_micro_usd=?,reason=? WHERE id=?',
-      )
-        .bind(sum.cost, gap, 'backfill_reconciled', row.id)
-        .run();
+      if (
+        gap < config.min_gap_micro_usd ||
+        gap * 100 < row.expected_micro_usd * config.gap_percent
+      ) {
+        await condition(
+          env.DB,
+          `quota_gap:${row.bucket_id}`,
+          false,
+          '补传后记录已补齐',
+          {},
+          config,
+          now,
+        );
+        await env.DB.prepare(
+          'UPDATE quota_intervals SET observed_micro_usd=?,gap_micro_usd=?,reason=? WHERE id=?',
+        )
+          .bind(sum.cost, gap, 'backfill_reconciled', row.id)
+          .run();
+      }
+    }
+  }
+}
+export async function reconcileRepriced(env: Env, now = Date.now()) {
+  const config = await monitorConfig(env.DB);
+  await resolveBackfill(env, config, now);
+  const counts = await env.DB.batch([
+    env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM usage_events WHERE (pricing_status='unpriced' OR model_id='unknown') AND (model_id LIKE 'gemini-%' OR model_id='unknown')",
+    ),
+    env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM usage_events WHERE (pricing_status='unpriced' OR model_id='unknown') AND (model_id LIKE 'claude-%' OR model_id LIKE 'gpt-%' OR model_id LIKE 'o3%' OR model_id='unknown')",
+    ),
+  ]);
+  const geminiUnpriced = (counts[0] as D1Result<{ n: number }>).results[0]?.n ?? 0;
+  const thirdPartyUnpriced = (counts[1] as D1Result<{ n: number }>).results[0]?.n ?? 0;
+  for (const bucket of bucketIds) {
+    const unpriced = bucket.startsWith('gemini') ? geminiUnpriced : thirdPartyUnpriced;
+    if (unpriced === 0) {
+      await condition(
+        env.DB,
+        `pricing_incomplete:${bucket}`,
+        false,
+        '补算后价格已补齐',
+        {},
+        config,
+        now,
+      );
     }
   }
 }

@@ -1,5 +1,15 @@
 # Changelog / 更新记录
 
+## 0.4.0 — 2026-11-07
+
+- Complete member management lifecycle: update member email and display name, soft-deactivate/reactivate members (freeing the 6-active-member cap while revoking active devices, expiring unused enrollment codes and pending collection requests, and retaining historical usage).
+- Ordinary member experience: independent per-member alert read acknowledgment (`POST /alerts/:id/ack`), personal notification preference toggle (`PUT /preferences`), read-only alert rules view (`GET /rules`), and direct Windows client download entry.
+- Alert rule lifecycle: inline rule editing and permanent deletion (`DELETE /rules/:id` and omission cleanup in `PUT /rules`).
+- Reconciliation and alert auto-recovery: `POST /reprice` clears resolved `pricing_incomplete` alerts, `o3` model family backfill reconciliation, and automatic stale condition/alert/email cleanup when resetting or disabling monitor settings.
+- Dynamic model display name mapping across usage and model views, smooth in-place Windows client binary upgrade, and removal of unused `watcher.rs` / `notify` dependency.
+
+支持成员修改邮箱与软停用/重新启用（释放 6 人活跃名额并保留历史统计）、普通成员独立标记预警已读与开关个人通知、只读查看预警规则与下载客户端；支持预警规则编辑与删除、补算价格自动解除待计价告警、客户端平滑覆盖升级。
+
 ## 0.3.0 — 2026-11-04
 
 - Administrator-only settings; ordinary members have a strictly read-only family dashboard.

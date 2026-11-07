@@ -39,7 +39,7 @@ export type Usage = {
   pricing_status: string;
   catalog_version: string | null;
 };
-export type Model = Totals & { model_id: string; member_id: string };
+export type Model = Totals & { model_id: string; model_display?: string; member_id: string };
 export type Alert = {
   id: string;
   rule_id: string;

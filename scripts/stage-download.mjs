@@ -4,6 +4,9 @@ import { createHash } from 'node:crypto';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const exe = root + 'artifacts/AgyFamilyMonitor.exe';
 if (existsSync(exe)) {
+  const publicDownloads = root + 'apps/web/public/downloads/';
+  mkdirSync(publicDownloads, { recursive: true });
+  copyFileSync(exe, publicDownloads + 'AgyFamilyMonitor.exe');
   const output = root + 'apps/web/dist/downloads/';
   mkdirSync(output, { recursive: true });
   copyFileSync(exe, output + 'AgyFamilyMonitor.exe');

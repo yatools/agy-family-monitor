@@ -73,6 +73,19 @@ async fn run() -> Result<bool, &'static str> {
             Ok(result.status == quota::Status::Ok || result.status == quota::Status::Disabled)
         }
         Action::Enroll | Action::Launch => {
+            if options.action == Action::Launch
+                && local.credentials()?.is_some()
+                && windows::autostart::needs_update(&data_dir)
+            {
+                windows::autostart::stop()?;
+                for _ in 0..25 {
+                    if windows::Instance::acquire(&data_dir).is_ok() {
+                        break;
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                }
+                return launch_collector(&data_dir);
+            }
             let instance = match windows::Instance::acquire(&data_dir) {
                 Ok(instance) => instance,
                 Err(message)
@@ -145,7 +158,20 @@ async fn run() -> Result<bool, &'static str> {
             if local.credentials()?.is_none() {
                 return Err("请先完成 --enroll 设备绑定。");
             }
+            let was_running = windows::Instance::acquire(&data_dir).is_err();
+            if was_running && windows::autostart::needs_update(&data_dir) {
+                windows::autostart::stop()?;
+                for _ in 0..25 {
+                    if windows::Instance::acquire(&data_dir).is_ok() {
+                        break;
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                }
+            }
             windows::autostart::install(&data_dir)?;
+            if was_running {
+                windows::autostart::start(&data_dir)?;
+            }
             println!("已创建当前用户的登录启动任务和通知应用身份。");
             Ok(true)
         }
