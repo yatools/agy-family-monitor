@@ -158,7 +158,7 @@ Rust build output uses a temporary directory to avoid GNU linker limitations wit
 
 ## Validation and status
 
-Local validation on November 7, 2026: **103 tests passed** (56 Rust + 41 Worker + 6 Web), plus Rust formatting, Clippy,
+Local validation on November 7, 2026: **104 tests passed** (57 Rust + 41 Worker + 6 Web), plus Rust formatting, Clippy,
 TypeScript checks, production bundling and a Windows release build.
 Real Windows / CC Switch reconciliation matched **73 sessions and 1,776 events** with no counter or model differences.
 Cloudflare email delivery was confirmed by the recipient, and real sanitized usage from the local Windows client was enrolled and uploaded to production.

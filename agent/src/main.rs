@@ -15,12 +15,74 @@ mod windows;
 
 use cli::{Action, Options};
 use std::{io::Write, process::ExitCode};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RunningChoice {
+    KeepRunning,
+    EnableAutostart,
+    DisableAutostart,
+    StopOnly,
+    Uninstall,
+}
+
+fn parse_running_choice(input: &str) -> Result<RunningChoice, &'static str> {
+    match input.trim() {
+        "" | "0" => Ok(RunningChoice::KeepRunning),
+        "1" => Ok(RunningChoice::EnableAutostart),
+        "2" => Ok(RunningChoice::DisableAutostart),
+        "3" => Ok(RunningChoice::StopOnly),
+        "4" => Ok(RunningChoice::Uninstall),
+        _ => Err("无效选项，请输入 1、2、3、4 或直接按 Enter 退出。"),
+    }
+}
+
 fn launch_collector(data_dir: &std::path::Path) -> Result<bool, &'static str> {
     windows::autostart::install(data_dir)?;
     windows::autostart::start(data_dir)?;
     println!(
         "后台采集已开启，下次登录会自动启动。\n你可以关闭此窗口，在家庭网站查看在线状态和用量。"
     );
+    Ok(true)
+}
+
+async fn uninstall_client(data_dir: &std::path::Path) -> Result<bool, &'static str> {
+    if std::fs::read_to_string(data_dir.join("agent.marker"))
+        .ok()
+        .as_deref()
+        != Some("agy-family-monitor-v1")
+    {
+        return Err("此目录缺少客户端归属标记，未删除任何文件。");
+    }
+    windows::autostart::stop()?;
+    let mut instance = None;
+    for _ in 0..25 {
+        if let Ok(guard) = windows::Instance::acquire(data_dir) {
+            instance = Some(guard);
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    let _instance = match instance {
+        Some(guard) => guard,
+        None => windows::Instance::acquire(data_dir)?,
+    };
+    windows::autostart::remove()?;
+    for name in [
+        "config.json",
+        "config.json.new",
+        "data.db",
+        "data.db-shm",
+        "data.db-wal",
+        "agent.marker",
+    ] {
+        match std::fs::remove_file(data_dir.join(name)) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => return Err("部分客户端文件无法删除，请停止后台实例后重试。"),
+        }
+    }
+    let _ = std::fs::remove_file(data_dir.join("AgyFamilyMonitor.exe"));
+    println!("登录启动、通知快捷方式、凭据和本地队列已移除；退出后可删除 EXE。");
     Ok(true)
 }
 
@@ -92,8 +154,52 @@ async fn run() -> Result<bool, &'static str> {
                     if options.action == Action::Launch
                         && message.starts_with("此客户端已在运行") =>
                 {
-                    println!("客户端已在后台采集，无需重复绑定或开启。");
-                    return Ok(true);
+                    let autostart_status = if windows::autostart::installed() {
+                        "已开启"
+                    } else {
+                        "已关闭"
+                    };
+                    println!(
+                        "客户端已在后台采集运行中（当前开机登录自启：{autostart_status}）。\n请选择操作（直接按 Enter 保持现状并退出）：\n  [1] 开启开机登录自启\n  [2] 关闭开机登录自启（保持当前后台运行）\n  [3] 关闭软件（仅停止本次后台采集，保留绑定配置）\n  [4] 关闭软件并彻底卸载（移除开机自启、绑定凭据与本地队列）"
+                    );
+                    print!("请输入选项 [1-4，默认 Enter 退出]: ");
+                    std::io::stdout().flush().map_err(|_| "无法显示输入提示")?;
+                    let mut choice = String::new();
+                    std::io::stdin()
+                        .read_line(&mut choice)
+                        .map_err(|_| "无法读取选项输入")?;
+                    match parse_running_choice(&choice)? {
+                        RunningChoice::KeepRunning => {
+                            println!("保持后台采集运行，未做更改。");
+                            return Ok(true);
+                        }
+                        RunningChoice::EnableAutostart => {
+                            windows::autostart::install(&data_dir)?;
+                            let stopped = windows::Instance::acquire(&data_dir).map(drop).is_ok();
+                            if stopped {
+                                windows::autostart::start(&data_dir)?;
+                            }
+                            println!("已开启开机登录自启，后台采集继续运行。");
+                            return Ok(true);
+                        }
+                        RunningChoice::DisableAutostart => {
+                            windows::autostart::disable_task()?;
+                            let stopped = windows::Instance::acquire(&data_dir).map(drop).is_ok();
+                            if stopped {
+                                windows::autostart::start(&data_dir)?;
+                            }
+                            println!("已关闭开机登录自启，当前后台采集继续运行。");
+                            return Ok(true);
+                        }
+                        RunningChoice::StopOnly => {
+                            windows::autostart::stop()?;
+                            println!("已关闭后台采集进程。下次可重新双击本程序开启。");
+                            return Ok(true);
+                        }
+                        RunningChoice::Uninstall => {
+                            return uninstall_client(&data_dir).await;
+                        }
+                    }
                 }
                 Err(message) => return Err(message),
             };
@@ -175,35 +281,7 @@ async fn run() -> Result<bool, &'static str> {
             println!("已创建当前用户的登录启动任务和通知应用身份。");
             Ok(true)
         }
-        Action::Uninstall => {
-            if std::fs::read_to_string(data_dir.join("agent.marker"))
-                .ok()
-                .as_deref()
-                != Some("agy-family-monitor-v1")
-            {
-                return Err("此目录缺少客户端归属标记，未删除任何文件。");
-            }
-            windows::autostart::stop()?;
-            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-            let _instance = windows::Instance::acquire(&data_dir)?;
-            windows::autostart::remove()?;
-            for name in [
-                "config.json",
-                "config.json.new",
-                "data.db",
-                "data.db-shm",
-                "data.db-wal",
-                "agent.marker",
-            ] {
-                match std::fs::remove_file(data_dir.join(name)) {
-                    Ok(()) => {}
-                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                    Err(_) => return Err("部分客户端文件无法删除，请停止后台实例后重试。"),
-                }
-            }
-            println!("登录启动、通知快捷方式、凭据和本地队列已移除；退出后可删除 EXE。");
-            Ok(true)
-        }
+        Action::Uninstall => uninstall_client(&data_dir).await,
         Action::Background => {
             let credentials = local.credentials()?.ok_or("请先完成设备绑定")?;
             let mut discovery = options.discovery()?;
@@ -272,4 +350,31 @@ async fn main() -> ExitCode {
         let _ = std::io::stdin().read_line(&mut line);
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn running_choice_accepts_menu_options_and_rejects_invalid_input() {
+        assert_eq!(parse_running_choice(""), Ok(RunningChoice::KeepRunning));
+        assert_eq!(
+            parse_running_choice(" \r\n "),
+            Ok(RunningChoice::KeepRunning)
+        );
+        assert_eq!(parse_running_choice("0"), Ok(RunningChoice::KeepRunning));
+        assert_eq!(
+            parse_running_choice(" 1\n"),
+            Ok(RunningChoice::EnableAutostart)
+        );
+        assert_eq!(
+            parse_running_choice("2"),
+            Ok(RunningChoice::DisableAutostart)
+        );
+        assert_eq!(parse_running_choice("3"), Ok(RunningChoice::StopOnly));
+        assert_eq!(parse_running_choice("4"), Ok(RunningChoice::Uninstall));
+        assert!(parse_running_choice("5").is_err());
+        assert!(parse_running_choice("abc").is_err());
+    }
 }

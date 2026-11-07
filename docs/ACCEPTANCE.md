@@ -159,7 +159,7 @@ a648cb94afa69c6128a9eacd35550b984fcd745ab26d3f48b3b7da867fc52e6e。
 
 ## 0.4.0：成员管理闭环、普通成员自助体验、告警恢复与本机实机接入
 
-- 56 项 Rust、41 项 Worker、6 项网页测试，共 103 项测试全部通过；cargo fmt --check、全目标全特性 Clippy（-D warnings）、前后端 TypeScript 检查与生产构建全部通过。
+- 57 项 Rust、41 项 Worker、6 项网页测试，共 104 项测试全部通过；cargo fmt --check、全目标全特性 Clippy（-D warnings）、前后端 TypeScript 检查与生产构建全部通过。
 - 成员管理闭环：支持管理员修改成员邮箱（含唯一性与格式校验）及昵称；支持软停用成员（status=inactive，释放 6 人活跃名额，禁止停用管理员自身，并在同一事务中撤销其名下设备、作废未使用绑定码与待执行采集指令，同时保留历史用量统计）及重新启用成员（受 6 名活跃成员上限约束）。
 - 普通成员体验与权限：普通成员可只读查看预警规则（GET /rules）、独立标记个人预警已读（POST /alerts/:id/ack）、独立切换个人本地通知偏好（PUT /preferences），并在界面顶栏与预警中心直接下载 AgyFamilyMonitor.exe 客户端；其余管理接口仍严格限制仅管理员可用。
 - 预警规则管理：支持管理员内联编辑已有预警规则及永久删除规则（DELETE /rules/:id 及 PUT /rules 差集清理，级联清理关联状态与通知记录），避免历史停用规则占用 50 条上限。
@@ -171,8 +171,8 @@ a648cb94afa69c6128a9eacd35550b984fcd745ab26d3f48b3b7da867fc52e6e。
   - 线上 D1 实机核验确认仅存储脱敏 HMAC 标识与数值统计，不含任何本地路径、提示词、对话正文、原始会话 ID 或 Google 凭据。
   - 本机执行 AgyFamilyMonitor.exe --check-quota 返回 status=not_installed（本机未安装官方 agy CLI，符合预期）。
 
-Windows 0.4.0 EXE：5,271,040 字节，SHA-256：
-149e73d0e2b554d4789ef198d2b5dec374c92da2b871cb2cccd15db1adf073ef。
+Windows 0.4.0 EXE：5,278,208 字节，SHA-256：
+52bf31e513e58a84777129c568700ace548e698991369080701e8bdd909dbcc1。
 最终 Worker 版本：acd458e1-6eaf-4e00-bcf8-4b3a52c8d43f。
 
 其余五名真实成员绑定、官方 agy CLI 真实额度采样校准、第二台独立 Windows 及六台设备连续 72 小时运行仍待后续实机验收。

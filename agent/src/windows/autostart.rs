@@ -129,7 +129,7 @@ pub fn install(data_dir: &Path) -> Result<(), &'static str> {
     Ok(())
 }
 
-pub fn remove() -> Result<(), &'static str> {
+pub fn disable_task() -> Result<(), &'static str> {
     if installed() {
         let result = command("schtasks.exe")?
             .args(["/Delete", "/TN", TASK_NAME, "/F"])
@@ -139,6 +139,11 @@ pub fn remove() -> Result<(), &'static str> {
             return Err("启动任务删除失败");
         }
     }
+    Ok(())
+}
+
+pub fn remove() -> Result<(), &'static str> {
+    disable_task()?;
     super::toast::remove_shortcut()
 }
 pub fn start(data_dir: &Path) -> Result<(), &'static str> {
